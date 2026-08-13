@@ -1,158 +1,116 @@
 #!/usr/bin/env node
 'use strict';
 
-const http  = require('http');
+// cake — minimal, dependency-free code-agent harness.
+//
+// The server is provider-agnostic: it asks the configured provider (see
+// ./providers) to build the upstream request and to parse its stream into
+// unified events, then relays those events to the browser as SSE. It knows
+// nothing about any specific API shape.
+
+const http = require('http');
 const https = require('https');
-const fs    = require('fs');
-const path  = require('path');
-const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
-const PORT     = process.env.PORT || 3000;
-const API_KEY  = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || '';
-const PROVIDER = process.env.PROVIDER || (process.env.ANTHROPIC_API_KEY ? 'anthropic' : 'openai');
+const providers = require('./providers');
+const tools = require('./tools');
 
-// ── static file helper ─────────────────────────────────────────────────────
+const PORT = process.env.PORT || 3000;
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+const CORS = { 'Access-Control-Allow-Origin': '*' };
+
+// ── static files ────────────────────────────────────────────────────────────
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
-  '.js':   'application/javascript; charset=utf-8',
-  '.css':  'text/css; charset=utf-8',
-  '.ico':  'image/x-icon',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.ico': 'image/x-icon',
 };
 
-const PUBLIC_DIR = path.join(__dirname, 'public');
-
 function serveStatic(req, res) {
-  // Strip query string and normalize to prevent path traversal
-  const urlPath   = req.url.split('?')[0];
-  const safePath  = path.normalize(urlPath).replace(/^(\.\.[/\\])+/, '');
-  const rel       = safePath === '/' || safePath === '.' ? 'index.html' : safePath;
-  const file      = path.join(PUBLIC_DIR, rel);
-  // Double-check: resolved path must be inside PUBLIC_DIR
+  const urlPath = req.url.split('?')[0];
+  const safePath = path.normalize(urlPath).replace(/^(\.\.[/\\])+/, '');
+  const rel = safePath === '/' || safePath === '.' ? 'index.html' : safePath;
+  const file = path.join(PUBLIC_DIR, rel);
+  // Resolved path must stay inside PUBLIC_DIR (block path traversal).
   if (!file.startsWith(PUBLIC_DIR + path.sep) && file !== PUBLIC_DIR) {
     res.writeHead(403); res.end('Forbidden'); return;
   }
-  const ext = path.extname(file);
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
     res.end(data);
   });
 }
 
-// ── LLM proxy ──────────────────────────────────────────────────────────────
+// ── chat: relay provider stream as unified SSE events ───────────────────────
 
-function proxyAnthropic(body, res) {
-  const payload = JSON.stringify({
-    model:      body.model || 'claude-opus-4-5',
-    max_tokens: body.max_tokens || 4096,
-    stream:     true,
-    system:     body.system || 'You are a helpful coding assistant.',
-    messages:   body.messages,
-  });
-
-  const options = {
-    hostname: 'api.anthropic.com',
-    path:     '/v1/messages',
-    method:   'POST',
-    headers: {
-      'Content-Type':      'application/json',
-      'x-api-key':         API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-  };
-
-  const upstream = https.request(options, (ur) => {
-    res.writeHead(200, {
-      'Content-Type':  'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection':    'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-    });
-    ur.pipe(res);
-  });
-  upstream.on('error', (e) => { res.writeHead(502); res.end(e.message); });
-  upstream.end(payload);
+function sendEvent(res, obj) {
+  res.write('data: ' + JSON.stringify(obj) + '\n\n');
 }
 
-function proxyOpenAI(body, res) {
-  const payload = JSON.stringify({
-    model:      body.model || 'gpt-4o',
-    stream:     true,
-    max_tokens: body.max_tokens || 4096,
-    messages: [
-      { role: 'system', content: body.system || 'You are a helpful coding assistant.' },
-      ...(body.messages || []),
-    ],
-  });
+function handleChat(body, res) {
+  let provider;
+  try { provider = providers.select(); }
+  catch (e) { res.writeHead(400, CORS); res.end(e.message); return; }
 
-  const bearerToken = 'Bearer ' + API_KEY;
-  const options = {
-    hostname: 'api.openai.com',
-    path:     '/v1/chat/completions',
-    method:   'POST',
-    headers: {
-      'Content-Type':  'application/json',
-      'Authorization': bearerToken,
-    },
-  };
+  res.writeHead(200, Object.assign({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  }, CORS));
 
-  const upstream = https.request(options, (ur) => {
-    res.writeHead(200, {
-      'Content-Type':  'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection':    'keep-alive',
-      'Access-Control-Allow-Origin': '*',
+  provider.buildRequest({
+    messages: body.messages || [],
+    tools: tools.definitions,
+    system: body.system,
+    model: body.model,
+    maxTokens: body.max_tokens,
+  }).then((upstreamReq) => {
+    const client = upstreamReq.transport === 'http' ? http : https;
+    const parser = provider.createParser();
+
+    const req = client.request(upstreamReq.options, (upstream) => {
+      if (upstream.statusCode >= 400) {
+        let errBody = '';
+        upstream.on('data', (d) => { errBody += d; });
+        upstream.on('end', () => {
+          sendEvent(res, { type: 'error', error: 'Upstream ' + upstream.statusCode + ': ' + errBody });
+          res.end();
+        });
+        return;
+      }
+      let buffer = '';
+      upstream.on('data', (chunk) => {
+        buffer += chunk;
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
+          for (const evt of parser.feed(data)) sendEvent(res, evt);
+        }
+      });
+      upstream.on('end', () => {
+        for (const evt of parser.flush()) sendEvent(res, evt);
+        sendEvent(res, { type: 'done' });
+        res.end();
+      });
     });
-    ur.pipe(res);
+    req.on('error', (e) => { sendEvent(res, { type: 'error', error: e.message }); res.end(); });
+    req.end(upstreamReq.body);
+  }).catch((e) => {
+    sendEvent(res, { type: 'error', error: e.message });
+    res.end();
   });
-  upstream.on('error', (e) => { res.writeHead(502); res.end(e.message); });
-  upstream.end(payload);
 }
 
-// ── tool execution ──────────────────────────────────────────────────────────
-
-function runTool(name, input, res) {
-  res.writeHead(200, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-  });
-
-  if (name === 'bash') {
-    const child = spawn('bash', ['-c', input.command || ''], { timeout: 30000 });
-    let stdout = '', stderr = '';
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
-    child.on('close', (code) => {
-      res.end(JSON.stringify({ stdout, stderr, exit_code: code }));
-    });
-    child.on('error', (e) => {
-      res.end(JSON.stringify({ stdout: '', stderr: e.message, exit_code: 1 }));
-    });
-  } else if (name === 'read_file') {
-    const filePath = path.resolve(input.path || '');
-    fs.readFile(filePath, 'utf8', (err, data) => {
-      if (err) res.end(JSON.stringify({ error: err.message }));
-      else     res.end(JSON.stringify({ content: data }));
-    });
-  } else if (name === 'write_file') {
-    const filePath = path.resolve(input.path || '');
-    fs.writeFile(filePath, input.content || '', 'utf8', (err) => {
-      if (err) res.end(JSON.stringify({ error: err.message }));
-      else     res.end(JSON.stringify({ ok: true }));
-    });
-  } else if (name === 'list_dir') {
-    const dir = path.resolve(input.path || '.');
-    fs.readdir(dir, { withFileTypes: true }, (err, entries) => {
-      if (err) res.end(JSON.stringify({ error: err.message }));
-      else     res.end(JSON.stringify({ entries: entries.map(e => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' })) }));
-    });
-  } else {
-    res.end(JSON.stringify({ error: 'Unknown tool: ' + name }));
-  }
-}
-
-// ── request router ──────────────────────────────────────────────────────────
+// ── router ──────────────────────────────────────────────────────────────────
 
 function readBody(req, cb) {
   const chunks = [];
@@ -163,13 +121,17 @@ function readBody(req, cb) {
   });
 }
 
+function sendJson(res, obj) {
+  res.writeHead(200, Object.assign({ 'Content-Type': 'application/json' }, CORS));
+  res.end(JSON.stringify(obj));
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin':  '*',
+    res.writeHead(204, Object.assign({
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
-    });
+    }, CORS));
     res.end();
     return;
   }
@@ -177,8 +139,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/api/chat') {
     readBody(req, (err, body) => {
       if (err) { res.writeHead(400); res.end('Bad JSON'); return; }
-      if (PROVIDER === 'anthropic') proxyAnthropic(body, res);
-      else                          proxyOpenAI(body, res);
+      handleChat(body, res);
     });
     return;
   }
@@ -186,14 +147,21 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/api/tool') {
     readBody(req, (err, body) => {
       if (err) { res.writeHead(400); res.end('Bad JSON'); return; }
-      runTool(body.name, body.input || {}, res);
+      tools.run(body.name, body.input || {}).then((result) => sendJson(res, result));
     });
     return;
   }
 
   if (req.method === 'GET' && req.url === '/api/config') {
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-    res.end(JSON.stringify({ provider: PROVIDER, hasKey: !!API_KEY }));
+    let provider;
+    try { provider = providers.select(); }
+    catch (e) { sendJson(res, { error: e.message }); return; }
+    sendJson(res, {
+      provider: provider.id,
+      label: provider.label,
+      model: provider.model(),
+      configured: provider.isConfigured(),
+    });
     return;
   }
 
@@ -201,6 +169,13 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
+  let info;
+  try {
+    const p = providers.select();
+    info = p.label + ' (' + p.model() + ')' + (p.isConfigured() ? '' : ' — not configured');
+  } catch (e) {
+    info = e.message;
+  }
   console.log('cake listening on http://localhost:' + PORT);
-  console.log('provider: ' + PROVIDER + '  |  key: ' + (API_KEY ? 'set' : 'missing (set ANTHROPIC_API_KEY or OPENAI_API_KEY)'));
+  console.log('provider: ' + info);
 });

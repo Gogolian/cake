@@ -124,10 +124,15 @@
 'use strict';
 
 // ── state ──────────────────────────────────────────────────────────────────
+// history holds a provider-neutral conversation. The server translates it
+// for whatever provider is configured, so this UI never deals with API shapes.
+//   { role: 'user',      content: string }
+//   { role: 'assistant', content: string, tool_calls: [{ id, name, input }] }
+//   { role: 'tool',      tool_call_id: string, content: string }
 
-let history    = [];  // [{role,content}]
-let provider   = 'openai';
-let busy       = false;
+let history = [];
+let busy    = false;
+const MAX_STEPS = 20;
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 
@@ -173,70 +178,18 @@ function setStatus(msg, cls) {
   $status.className = cls || '';
 }
 
-// ── tool definitions (sent to LLM) ────────────────────────────────────────
+// ── streaming (unified events from server) ─────────────────────────────────
+// The server emits a single event shape regardless of provider:
+//   { type: 'text',  text }         – streamed assistant text
+//   { type: 'tool',  id, name, input } – a complete tool call
+//   { type: 'error', error }
+//   { type: 'done' }
 
-const TOOLS_ANTHROPIC = [
-  {
-    name: 'bash',
-    description: 'Run a shell command and return stdout/stderr.',
-    input_schema: {
-      type: 'object',
-      properties: { command: { type: 'string', description: 'The bash command to run.' } },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'read_file',
-    description: 'Read a file from the filesystem.',
-    input_schema: {
-      type: 'object',
-      properties: { path: { type: 'string', description: 'Absolute or relative path to the file.' } },
-      required: ['path'],
-    },
-  },
-  {
-    name: 'write_file',
-    description: 'Write content to a file.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        path:    { type: 'string', description: 'Path to write to.' },
-        content: { type: 'string', description: 'Content to write.' },
-      },
-      required: ['path', 'content'],
-    },
-  },
-  {
-    name: 'list_dir',
-    description: 'List directory contents.',
-    input_schema: {
-      type: 'object',
-      properties: { path: { type: 'string', description: 'Directory path.' } },
-      required: ['path'],
-    },
-  },
-];
-
-const TOOLS_OPENAI = TOOLS_ANTHROPIC.map(t => ({
-  type: 'function',
-  function: {
-    name:        t.name,
-    description: t.description,
-    parameters:  t.input_schema,
-  },
-}));
-
-// ── SSE / streaming helpers ────────────────────────────────────────────────
-
-async function streamChat(messages) {
-  const body = { messages };
-  if (provider === 'anthropic') body.tools = TOOLS_ANTHROPIC;
-  else                          body.tools = TOOLS_OPENAI;
-
+async function streamChat(messages, onText) {
   const resp = await fetch('/api/chat', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(body),
+    body:    JSON.stringify({ messages }),
   });
 
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -255,42 +208,15 @@ async function streamChat(messages) {
     for (const line of lines) {
       if (!line.startsWith('data:')) continue;
       const raw = line.slice(5).trim();
-      if (!raw || raw === '[DONE]') continue;
-      try {
-        const ev = JSON.parse(raw);
-        if (provider === 'anthropic') parseAnthropicEvent(ev, result);
-        else                          parseOpenAIEvent(ev, result);
-      } catch (_) {}
+      if (!raw) continue;
+      let ev;
+      try { ev = JSON.parse(raw); } catch (_) { continue; }
+      if (ev.type === 'text') { result.text += ev.text; if (onText) onText(result.text); }
+      else if (ev.type === 'tool')  result.tool_calls.push({ id: ev.id, name: ev.name, input: ev.input });
+      else if (ev.type === 'error') throw new Error(ev.error);
     }
   }
   return result;
-}
-
-function parseAnthropicEvent(ev, result) {
-  if (ev.type === 'content_block_delta') {
-    if (ev.delta.type === 'text_delta')        result.text += ev.delta.text;
-    if (ev.delta.type === 'input_json_delta') {
-      const tc = result.tool_calls;
-      if (!tc[ev.index]) tc[ev.index] = { name: '', input_json: '' };
-      tc[ev.index].input_json += ev.delta.partial_json;
-    }
-  }
-  if (ev.type === 'content_block_start' && ev.content_block.type === 'tool_use') {
-    result.tool_calls[ev.index] = { name: ev.content_block.name, input_json: '' };
-  }
-}
-
-function parseOpenAIEvent(ev, result) {
-  const delta = ev.choices?.[0]?.delta;
-  if (!delta) return;
-  if (delta.content)     result.text += delta.content;
-  if (delta.tool_calls) {
-    for (const tc of delta.tool_calls) {
-      if (!result.tool_calls[tc.index]) result.tool_calls[tc.index] = { name: '', input_json: '' };
-      if (tc.function?.name)      result.tool_calls[tc.index].name       += tc.function.name;
-      if (tc.function?.arguments) result.tool_calls[tc.index].input_json += tc.function.arguments;
-    }
-  }
 }
 
 // ── tool execution ─────────────────────────────────────────────────────────
@@ -309,14 +235,14 @@ async function executeTool(name, input) {
 async function agentLoop(userText) {
   history.push({ role: 'user', content: userText });
 
-  for (let i = 0; i < 20; i++) {
-    // Show "thinking" placeholder
+  for (let i = 0; i < MAX_STEPS; i++) {
+    // Show "thinking" placeholder, streamed into as text arrives.
     const el = addMessage('assistant', '…');
     el.querySelector('.body').classList.add('thinking');
 
     let result;
     try {
-      result = await streamChat(history);
+      result = await streamChat(history, (text) => updateMessage(el, text));
     } catch (err) {
       updateMessage(el, 'Error: ' + err.message);
       return;
@@ -328,55 +254,23 @@ async function agentLoop(userText) {
     if (text) updateMessage(el, text);
     else      el.remove();
 
-    // Push assistant turn
-    if (provider === 'anthropic') {
-      const content = [];
-      if (text) content.push({ type: 'text', text });
-      for (const tc of toolCalls) {
-        let inp = {};
-        try { inp = JSON.parse(tc.input_json); } catch (_) {}
-        content.push({ type: 'tool_use', id: 'tool_' + Date.now() + '_' + Math.random().toString(36).slice(2), name: tc.name, input: inp });
-      }
-      if (content.length) history.push({ role: 'assistant', content });
-    } else {
-      if (text || toolCalls.length) {
-        const msg = { role: 'assistant', content: text || null };
-        if (toolCalls.length) {
-          msg.tool_calls = toolCalls.map((tc, idx) => ({
-            id: 'call_' + idx + '_' + Date.now(),
-            type: 'function',
-            function: { name: tc.name, arguments: tc.input_json },
-          }));
-        }
-        history.push(msg);
-      }
+    // Record the assistant turn in the unified format.
+    if (text || toolCalls.length) {
+      history.push({ role: 'assistant', content: text, tool_calls: toolCalls });
     }
 
     if (!toolCalls.length) break;
 
-    // Execute each tool
+    // Execute each tool and append its result.
     for (const tc of toolCalls) {
-      let inp = {};
-      try { inp = JSON.parse(tc.input_json); } catch (_) {}
-
-      const preview = JSON.stringify(inp, null, 2);
+      const preview = JSON.stringify(tc.input, null, 2);
       const toolEl  = addMessage('tool', preview, tc.name);
 
-      const toolResult = await executeTool(tc.name, inp);
+      const toolResult = await executeTool(tc.name, tc.input);
       const output     = JSON.stringify(toolResult, null, 2);
       updateMessage(toolEl, preview + '\n\n→ ' + output);
 
-      // Add tool result to history
-      if (provider === 'anthropic') {
-        const assistantContent = history[history.length - 1].content;
-        const useBlock = assistantContent.find(b => b.type === 'tool_use' && b.name === tc.name);
-        const toolId = useBlock ? useBlock.id : 'tool_' + Date.now();
-        history.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: output }] });
-      } else {
-        const lastMsg = history[history.length - 1];
-        const callId  = lastMsg.tool_calls?.find(c => c.function.name === tc.name)?.id || 'call_0';
-        history.push({ role: 'tool', tool_call_id: callId, content: output });
-      }
+      history.push({ role: 'tool', tool_call_id: tc.id, content: output });
     }
   }
 }
@@ -425,9 +319,9 @@ $clearBtn.addEventListener('click', () => {
 (async () => {
   try {
     const cfg = await fetch('/api/config').then(r => r.json());
-    provider = cfg.provider;
-    if (cfg.hasKey) setStatus('ready — ' + provider, 'ok');
-    else            setStatus('no API key set', 'err');
+    const name = cfg.label || cfg.provider || 'unknown';
+    if (cfg.configured) setStatus('ready — ' + name + ' · ' + cfg.model, 'ok');
+    else                setStatus(name + ' not configured — set an API key', 'err');
   } catch (e) {
     setStatus('server error', 'err');
   }
