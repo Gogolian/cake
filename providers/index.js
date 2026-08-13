@@ -18,12 +18,14 @@
 const providers = {
   anthropic: require('./anthropic'),
   openai: require('./openai'),
+  openrouter: require('./openrouter'),
   ollama: require('./ollama'),
+  llamacpp: require('./llamacpp'),
   copilot: require('./copilot'),
 };
 
 // Display / auto-detection order.
-const ORDER = ['anthropic', 'openai', 'ollama', 'copilot'];
+const ORDER = ['anthropic', 'openai', 'openrouter', 'ollama', 'llamacpp', 'copilot'];
 
 // Pick the active provider for a chat request. An explicit id (from the UI's
 // model picker) wins; otherwise fall back to a PROVIDER env override, then the

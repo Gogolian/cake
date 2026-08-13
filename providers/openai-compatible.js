@@ -1,7 +1,7 @@
 'use strict';
 
 // Reusable building blocks for any provider that speaks the OpenAI
-// Chat Completions API (OpenAI itself, Ollama, GitHub Copilot, ...).
+// Chat Completions API (OpenAI, OpenRouter, Ollama, llama.cpp, GitHub Copilot, ...).
 //
 // A concrete provider only needs to supply endpoint + auth details; the
 // message/tool translation and SSE parsing are identical and live here.

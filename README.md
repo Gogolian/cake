@@ -5,7 +5,7 @@ Minimal code agent harness with no dependencies.
 - **Pure HTML + JS** frontend (no framework, no build step)
 - **Pure Node.js** server (zero npm dependencies)
 - **Pluggable providers** — each LLM backend lives in its own file under [`providers/`](providers/), behind one unified interface
-- Ships with **Anthropic**, **OpenAI**, **Ollama**, and **GitHub Copilot** providers — **all loaded at once**; pick any provider/model from the UI
+- Ships with **Anthropic**, **OpenAI**, **OpenRouter**, **Ollama**, **llama.cpp**, and **GitHub Copilot** providers — **all loaded at once**; pick any provider/model from the UI
 - **Model picker**, per-answer **model annotation**, and a **context meter** (`≈ used / max`)
 - Agentic loop with tool calls: `bash`, `read_file`, `write_file`, `list_dir`
 - Server-sent events for streaming responses
@@ -19,12 +19,16 @@ npm start          # or: node server.js
 # Configure any providers you want; each appears in the model picker.
 export ANTHROPIC_API_KEY=sk-ant-...   # Anthropic
 export OPENAI_API_KEY=sk-...          # OpenAI
+export OPENROUTER_API_KEY=sk-or-...   # OpenRouter (gateway to many models)
 npm start
 
 # Ollama (local, no key) — auto-detected on http://127.0.0.1:11434 when running
 npm start
 # ...or point at a remote server:
 OLLAMA_URL=http://my-host:11434 npm start
+
+# llama.cpp (local, no key) — point at a running llama-server:
+LLAMACPP_URL=http://127.0.0.1:8080 npm start
 
 # GitHub Copilot (experimental) — sign in from the UI, or:
 node server.js --login && npm start
@@ -36,24 +40,32 @@ PORT=8080 npm start
 Then open http://localhost:3000 in your browser.
 
 Every provider is loaded on startup. Any provider that isn't configured (no API
-key, no local Ollama, not signed in to Copilot) or that errors is simply skipped
-— the app keeps working with whatever is available. Use the **model picker** in
-the header to choose a `provider/model`; each reply is labelled with the model
-that produced it, and the context meter shows the approximate tokens used
-against the selected model's maximum.
+key, no local Ollama or llama.cpp, not signed in to Copilot) or that errors is
+simply skipped — the app keeps working with whatever is available. Use the
+**model picker** in the header to choose a `provider/model`; each reply is
+labelled with the model that produced it, and the context meter shows the
+approximate tokens used against the selected model's maximum.
 
 ## Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `PROVIDER` | — | Optional default provider when the UI sends none: `anthropic`, `openai`, `ollama`, `copilot`. No longer required — all providers load regardless. |
+| `PROVIDER` | — | Optional default provider when the UI sends none: `anthropic`, `openai`, `openrouter`, `ollama`, `llamacpp`, `copilot`. No longer required — all providers load regardless. |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key (enables the anthropic provider) |
 | `OPENAI_API_KEY` | — | OpenAI API key (enables the openai provider) |
+| `OPENROUTER_API_KEY` | — | OpenRouter API key (enables the openrouter provider) |
 | `ANTHROPIC_MODEL` | `claude-opus-4-5` | Default model for the anthropic provider |
 | `OPENAI_MODEL` | `gpt-4o` | Default model for the openai provider |
+| `OPENROUTER_MODEL` | `openai/gpt-4o` | Default model for the openrouter provider |
+| `OPENROUTER_SITE_URL` | — | Optional site URL sent as `HTTP-Referer` for OpenRouter app attribution |
+| `OPENROUTER_APP_NAME` | — | Optional app name sent as `X-Title` for OpenRouter app attribution |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Base URL of the Ollama server |
 | `OLLAMA_MODEL` | `llama3.1` | Default model for the ollama provider |
 | `OLLAMA_NUM_CTX` | `8192` | Context window reported for Ollama models (they don't advertise it) |
+| `LLAMACPP_URL` | `http://127.0.0.1:8080` | Base URL of the llama.cpp server (`llama-server`); also opts the provider in |
+| `LLAMACPP_MODEL` | `llama.cpp` | Default model label for the llama.cpp provider (the live model is read from the server) |
+| `LLAMACPP_API_KEY` | — | Token used to authenticate to llama.cpp, only if `llama-server` was started with `--api-key` |
+| `LLAMACPP_NUM_CTX` | `4096` | Fallback context window for llama.cpp when the server doesn't report one |
 | `COPILOT_MODEL` | `gpt-4o` | Default model for the copilot provider |
 | `GITHUB_COPILOT_TOKEN` | — | GitHub OAuth token for Copilot; overrides `--login` and the editor plugin config |
 | `COPILOT_DEBUG` | — | Set to `1` to log Copilot auth/token-exchange details to stderr (see [Copilot sign-in](#github-copilot-sign-in)) |
@@ -61,10 +73,11 @@ against the selected model's maximum.
 | `PORT` | `3000` | HTTP port |
 
 All providers are always loaded. The UI's model picker lists a `provider/model`
-for every provider that is currently usable (has a key, a reachable Ollama, or a
-signed-in Copilot); the `*_MODEL` variables only set each provider's **default**
-model for when no explicit selection is sent. `PROVIDER` is now optional and
-only chooses the fallback provider for a request that doesn't name one.
+for every provider that is currently usable (has a key, a reachable Ollama or
+llama.cpp, or a signed-in Copilot); the `*_MODEL` variables only set each
+provider's **default** model for when no explicit selection is sent. `PROVIDER`
+is now optional and only chooses the fallback provider for a request that
+doesn't name one.
 
 ## GitHub Copilot sign-in
 
