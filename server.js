@@ -20,10 +20,19 @@ const MIME = {
   '.ico':  'image/x-icon',
 };
 
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
 function serveStatic(req, res) {
-  const rel  = req.url === '/' ? '/index.html' : req.url;
-  const file = path.join(__dirname, 'public', rel);
-  const ext  = path.extname(file);
+  // Strip query string and normalize to prevent path traversal
+  const urlPath   = req.url.split('?')[0];
+  const safePath  = path.normalize(urlPath).replace(/^(\.\.[/\\])+/, '');
+  const rel       = safePath === '/' || safePath === '.' ? 'index.html' : safePath;
+  const file      = path.join(PUBLIC_DIR, rel);
+  // Double-check: resolved path must be inside PUBLIC_DIR
+  if (!file.startsWith(PUBLIC_DIR + path.sep) && file !== PUBLIC_DIR) {
+    res.writeHead(403); res.end('Forbidden'); return;
+  }
+  const ext = path.extname(file);
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
     res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
