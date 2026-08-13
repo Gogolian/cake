@@ -3,9 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>cake 🎂</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg: #0d0d0d;
       --surface: #1a1a1a;
@@ -21,6 +19,7 @@
       --radius: 8px;
       --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
     }
+    *, *::before, *::after { box-sizing: border-box; }
     body {
       background: var(--bg);
       color: var(--text);
@@ -30,17 +29,19 @@
       height: 100dvh;
       display: flex;
       flex-direction: column;
+      margin: 0;
+      overflow: hidden;
     }
     header {
-      padding: 12px 20px;
+      padding: 10px 16px;
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       gap: 12px;
+      flex-shrink: 0;
     }
-    header h1 { font-size: 16px; font-weight: 600; }
+    header h1 { font-size: 16px; font-weight: 600; margin: 0; }
     #model-picker {
-      margin-left: auto;
       background: var(--surface);
       color: var(--text);
       border: 1px solid var(--border);
@@ -53,23 +54,93 @@
     }
     #model-picker:focus { border-color: var(--accent); }
     #model-picker:disabled { opacity: .5; }
-    #context {
-      font-size: 12px;
-      color: var(--muted);
-      font-family: var(--font-mono);
-      white-space: nowrap;
-    }
+    #context { font-size: 12px; color: var(--muted); font-family: var(--font-mono); white-space: nowrap; }
     #status { font-size: 12px; color: var(--muted); }
-    #status.ok   { color: #4caf50; }
-    #status.err  { color: var(--error); }
-    #messages {
+    #status.ok  { color: #4caf50; }
+    #status.err { color: var(--error); }
+    #app {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      min-height: 0;
+    }
+    #sidebar {
+      width: 220px;
+      min-width: 160px;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+    #new-session-btn {
+      margin: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 500;
+      background: transparent;
+      border: 1px dashed var(--border);
+      color: var(--muted);
+      border-radius: var(--radius);
+      cursor: pointer;
+      text-align: left;
+    }
+    #new-session-btn:hover { background: var(--surface); color: var(--text); border-color: var(--accent); border-style: solid; }
+    #session-list {
       flex: 1;
       overflow-y: auto;
-      padding: 16px 20px;
+      padding: 0 6px 8px;
       display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .session-item {
+      padding: 7px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.1s;
+      min-width: 0;
+    }
+    .session-item:hover { background: var(--surface); }
+    .session-item.active { background: var(--surface); border-color: var(--border); }
+    .session-item .sess-title {
+      font-size: 12px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: block;
+    }
+    .session-item .sess-date {
+      font-size: 10px;
+      color: var(--muted);
+      display: block;
+      margin-top: 1px;
+    }
+    .session-item.busy .sess-title::after { content: ' \231B'; font-size: 10px; }
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 0;
+    }
+    #messages-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    .session-pane {
+      display: none;
+      position: absolute;
+      inset: 0;
+      overflow-y: auto;
+      padding: 16px 20px;
       flex-direction: column;
       gap: 12px;
     }
+    .session-pane.active { display: flex; }
     .msg {
       padding: 12px 16px;
       border-radius: var(--radius);
@@ -89,11 +160,21 @@
     code, pre { font-family: var(--font-mono); }
     pre { background: #111; border: 1px solid var(--border); border-radius: 4px; padding: 10px; overflow-x: auto; margin: 8px 0; }
     code { background: #111; padding: 1px 4px; border-radius: 3px; }
+    .thinking { color: var(--muted); font-style: italic; }
     footer {
-      padding: 12px 20px;
+      padding: 12px 16px;
       border-top: 1px solid var(--border);
       display: flex;
+      flex-direction: column;
       gap: 8px;
+      flex-shrink: 0;
+    }
+    #controls { display: flex; gap: 8px; align-items: center; }
+    #send-btn {
+      width: 40px; height: 40px; padding: 0;
+      border-radius: 9999px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 16px; line-height: 1;
     }
     #input {
       flex: 1;
@@ -124,97 +205,85 @@
     button:disabled { opacity: .4; cursor: not-allowed; }
     button:hover:not(:disabled) { filter: brightness(1.1); }
     #clear-btn { background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
-    .thinking { color: var(--muted); font-style: italic; }
-    .tool-name { color: var(--accent); font-weight: 700; }
-    #login-btn { margin-left: 12px; padding: 6px 12px; font-size: 12px; }
+    #login-btn { margin-left: 4px; padding: 6px 12px; font-size: 12px; }
     a { color: var(--accent); }
   </style>
 </head>
 <body>
 <header>
-  <span>🎂</span>
+  <span>&#x1F382;</span>
   <h1>cake</h1>
+  <button id="login-btn" style="display:none">Sign in to GitHub Copilot</button>
+  <div style="flex:1"></div>
   <select id="model-picker" title="Provider / model" disabled></select>
   <span id="context" title="Estimated context tokens used / model maximum"></span>
-  <span id="status">connecting…</span>
-  <button id="login-btn" style="display:none">Sign in to GitHub Copilot</button>
+  <span id="status">connecting&#x2026;</span>
 </header>
-<div id="messages"></div>
-<footer>
-  <textarea id="input" placeholder="Ask anything… (Shift+Enter for newline)" rows="1"></textarea>
-  <button id="clear-btn" title="Clear conversation">✕</button>
-  <button id="send-btn">Send</button>
-</footer>
+
+<div id="app">
+  <div id="sidebar">
+    <button id="new-session-btn">+ New session</button>
+    <div id="session-list"></div>
+  </div>
+  <div id="main">
+    <div id="messages-container"></div>
+    <footer>
+      <textarea id="input" placeholder="Ask anything&#x2026; (Shift+Enter for newline)" rows="1"></textarea>
+      <div id="controls">
+        <button id="clear-btn" title="Clear this session">&#x2715; Clear</button>
+        <div style="flex:1"></div>
+        <button id="send-btn" title="Send" aria-label="Send">&#x25BA;</button>
+      </div>
+    </footer>
+  </div>
+</div>
 
 <script>
 'use strict';
 
-// ── state ──────────────────────────────────────────────────────────────────
-// history holds a provider-neutral conversation. The server translates it
-// for whatever provider is configured, so this UI never deals with API shapes.
-//   { role: 'user',      content: string }
-//   { role: 'assistant', content: string, tool_calls: [{ id, name, input }] }
-//   { role: 'tool',      tool_call_id: string, content: string }
+// ── per-session state ───────────────────────────────────────────────────────
+// sessions: Map<id, { id, history, busy, pane, title }>
+//   id      — timestamp string used as server session_start key
+//   history — provider-neutral conversation array
+//   busy    — true while LLM responding (does NOT block switching sessions)
+//   pane    — the .session-pane DOM element for this session's messages
+//   title   — first user message (up to 60 chars), or null
+//
+// Multiple sessions can be busy simultaneously. Each agentLoop writes only to
+// its own session's history and pane. There is no shared mutable state between
+// sessions, so N concurrent conversations cannot cross-contaminate.
 
-let history = [];
-let busy    = false;
+const sessions = new Map();
+let activeSessionId = null;
 const MAX_STEPS = 20;
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
+const $msgContainer = document.getElementById('messages-container');
+const $sessionList  = document.getElementById('session-list');
+const $input        = document.getElementById('input');
+const $sendBtn      = document.getElementById('send-btn');
+const $clearBtn     = document.getElementById('clear-btn');
+const $status       = document.getElementById('status');
+const $loginBtn     = document.getElementById('login-btn');
+const $picker       = document.getElementById('model-picker');
+const $context      = document.getElementById('context');
 
-const $messages = document.getElementById('messages');
-const $input    = document.getElementById('input');
-const $sendBtn  = document.getElementById('send-btn');
-const $clearBtn = document.getElementById('clear-btn');
-const $status   = document.getElementById('status');
-const $loginBtn = document.getElementById('login-btn');
-const $picker   = document.getElementById('model-picker');
-const $context  = document.getElementById('context');
-
-// provider/model → max context tokens, filled in from /api/config.
 let modelMax = {};
+let serverSessionList = [];
 
 // ── utilities ──────────────────────────────────────────────────────────────
-
 function escapeHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function renderMarkdown(text) {
-  // Very minimal markdown: code blocks, inline code, bold, italic
-  return escapeHtml(text)
+  // Strip tool-call IDs before rendering — name + input are sufficient for display
+  const t = text.replace(/(\*\*\u2192 [^*\n]+\*\*) `[^\n`]+`/g, '$1');
+  return escapeHtml(t)
     .replace(/```([\s\S]*?)```/g, (_,c) => '<pre><code>' + c.trim() + '</code></pre>')
     .replace(/`([^`]+)`/g, (_,c) => '<code>' + c + '</code>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>');
-}
-
-function addMessage(role, content, extra) {
-  const el = document.createElement('div');
-  el.className = 'msg ' + role;
-  const label = role === 'user' ? 'You' : role === 'tool' ? (extra || 'tool') : 'Assistant';
-  el.innerHTML = '<div class="label">' + escapeHtml(label) + '</div>'
-    + '<div class="body">' + renderMarkdown(content) + '</div>';
-  $messages.appendChild(el);
-  el.scrollIntoView({ block: 'end' });
-  return el;
-}
-
-function updateMessage(el, text) {
-  el.querySelector('.body').innerHTML = renderMarkdown(text);
-  el.scrollIntoView({ block: 'end' });
-}
-
-// Annotate an assistant message with the provider/model that produced it.
-function setModelLabel(el, meta) {
-  if (!meta || !meta.model) return;
-  const label = el.querySelector('.label');
-  if (!label) return;
-  label.textContent = 'Assistant ';
-  const tag = document.createElement('span');
-  tag.className = 'model';
-  tag.textContent = meta.provider ? meta.provider + '/' + meta.model : meta.model;
-  label.appendChild(tag);
 }
 
 function setStatus(msg, cls) {
@@ -222,9 +291,7 @@ function setStatus(msg, cls) {
   $status.className = cls || '';
 }
 
-// ── model picker + context meter ────────────────────────────────────────────
-
-// Currently selected picker entry, split into provider + model + max context.
+// ── model picker + context meter ───────────────────────────────────────────
 function selectedModel() {
   const val = $picker.value || '';
   const slash = val.indexOf('/');
@@ -232,9 +299,6 @@ function selectedModel() {
   return { provider: val.slice(0, slash), model: val.slice(slash + 1), max: modelMax[val] || 0 };
 }
 
-// Populate the picker from /api/config, grouping models by provider and using
-// `provider/model` as both the value and the visible label. A previously chosen
-// entry is preserved across refreshes when it still exists.
 function buildPicker(list) {
   const prev = $picker.value;
   $picker.innerHTML = '';
@@ -248,33 +312,25 @@ function buildPicker(list) {
       const val = p.id + '/' + m.id;
       modelMax[val] = m.maxContext || 0;
       const opt = document.createElement('option');
-      opt.value = val;
-      opt.textContent = val;
-      group.appendChild(opt);
-      count++;
+      opt.value = val; opt.textContent = val;
+      group.appendChild(opt); count++;
     }
     $picker.appendChild(group);
   }
   if (!count) {
     const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = 'no models available';
-    $picker.appendChild(opt);
-    $picker.disabled = true;
-    return;
+    opt.value = ''; opt.textContent = 'no models available';
+    $picker.appendChild(opt); $picker.disabled = true; return;
   }
   $picker.disabled = false;
   if (prev && Object.prototype.hasOwnProperty.call(modelMax, prev)) $picker.value = prev;
 }
 
-// Compact token count, e.g. 128000 → "128k", 1234 → "1.2k".
 function fmtTokens(n) {
   n = Number(n) || 0;
   return n >= 1000 ? (Math.round(n / 100) / 10) + 'k' : String(n);
 }
 
-// Rough token estimate for the provider-neutral history (~4 chars/token). Exact
-// counts need a per-provider tokenizer; this is a dependency-free approximation.
 function estimateTokens(hist) {
   let chars = 0;
   for (const m of hist) {
@@ -286,32 +342,205 @@ function estimateTokens(hist) {
   return Math.ceil(chars / 4);
 }
 
-// Refresh the "≈ used / max" context indicator for the current selection.
 function updateContext() {
-  const sel = selectedModel();
-  const used = estimateTokens(history);
-  if (sel && sel.max) $context.textContent = 'ctx ≈ ' + fmtTokens(used) + ' / ' + fmtTokens(sel.max);
-  else if (used)      $context.textContent = 'ctx ≈ ' + fmtTokens(used);
+  const sess = activeSessionId ? sessions.get(activeSessionId) : null;
+  const hist = sess ? sess.history : [];
+  const sel  = selectedModel();
+  const used = estimateTokens(hist);
+  if (sel && sel.max) $context.textContent = 'ctx \u2248 ' + fmtTokens(used) + ' / ' + fmtTokens(sel.max);
+  else if (used)      $context.textContent = 'ctx \u2248 ' + fmtTokens(used);
   else                $context.textContent = '';
 }
 
-// ── streaming (unified events from server) ─────────────────────────────────
-// The server emits a single event shape regardless of provider:
-//   { type: 'meta',  provider, model }  – which model is answering
-//   { type: 'text',  text }         – streamed assistant text
-//   { type: 'tool',  id, name, input } – a complete tool call
-//   { type: 'error', error }
-//   { type: 'done' }
+// ── session pane helpers ───────────────────────────────────────────────────
+function createPane(id) {
+  const pane = document.createElement('div');
+  pane.className = 'session-pane';
+  pane.dataset.sessionId = id;
+  $msgContainer.appendChild(pane);
+  return pane;
+}
 
-async function streamChat(messages, onText, onMeta) {
+function addMsg(pane, role, content, extra) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + role;
+  const label = role === 'user' ? 'You' : role === 'tool' ? (extra || 'tool') : 'Assistant';
+  el.innerHTML = '<div class="label">' + escapeHtml(label) + '</div>'
+    + '<div class="body">' + renderMarkdown(content) + '</div>';
+  pane.appendChild(el);
+  if (pane.classList.contains('active')) el.scrollIntoView({ block: 'end' });
+  return el;
+}
+
+function updateMsg(el, text) {
+  el.querySelector('.body').innerHTML = renderMarkdown(text);
+  const pane = el.closest('.session-pane');
+  if (pane && pane.classList.contains('active')) el.scrollIntoView({ block: 'end' });
+}
+
+function setModelLabel(el, meta) {
+  if (!meta || !meta.model) return;
+  const label = el.querySelector('.label');
+  if (!label) return;
+  label.textContent = 'Assistant ';
+  const tag = document.createElement('span');
+  tag.className = 'model';
+  tag.textContent = meta.provider ? meta.provider + '/' + meta.model : meta.model;
+  label.appendChild(tag);
+}
+
+// ── session lifecycle ──────────────────────────────────────────────────────
+function createLocalSession(id) {
+  id = id || String(Date.now());
+  const pane = createPane(id);
+  sessions.set(id, { id, history: [], busy: false, pane, title: null });
+  return id;
+}
+
+function switchSession(id) {
+  if (activeSessionId) {
+    const prev = sessions.get(activeSessionId);
+    if (prev) prev.pane.classList.remove('active');
+    const oldItem = $sessionList.querySelector('.session-item[data-id="' + activeSessionId + '"]');
+    if (oldItem) oldItem.classList.remove('active');
+  }
+
+  activeSessionId = id;
+  const sess = sessions.get(id);
+  if (!sess) return;
+
+  sess.pane.classList.add('active');
+  sess.pane.scrollTop = sess.pane.scrollHeight;
+
+  // Send button reflects THIS session's busy state only
+  $sendBtn.disabled = sess.busy;
+
+  $sessionList.querySelectorAll('.session-item.active').forEach(el => el.classList.remove('active'));
+  const newItem = $sessionList.querySelector('.session-item[data-id="' + id + '"]');
+  if (newItem) newItem.classList.add('active');
+
+  updateContext();
+}
+
+function refreshSessionItem(id) {
+  const item = $sessionList.querySelector('.session-item[data-id="' + id + '"]');
+  if (!item) { renderSessionList(); return; }
+  const sess = sessions.get(id);
+  item.classList.toggle('active', id === activeSessionId);
+  item.classList.toggle('busy', !!(sess && sess.busy));
+  if (sess && sess.title) {
+    const t = item.querySelector('.sess-title');
+    if (t) t.textContent = sess.title;
+  }
+}
+
+// ── sidebar ────────────────────────────────────────────────────────────────
+function renderSessionList() {
+  $sessionList.innerHTML = '';
+
+  const serverIds = new Set(serverSessionList.map(s => s.id));
+  const localOnly = [...sessions.values()]
+    .filter(s => !serverIds.has(s.id))
+    .sort((a, b) => Number(b.id) - Number(a.id));
+
+  for (const s of localOnly) {
+    appendSessionItem({ id: s.id, title: s.title || 'New conversation', date: null });
+  }
+
+  for (const s of serverSessionList) {
+    const mem = sessions.get(s.id);
+    appendSessionItem({
+      id: s.id,
+      title: (mem && mem.title) || s.title || ('Session ' + (s.date || s.id)),
+      date: s.date,
+    });
+  }
+}
+
+function appendSessionItem({ id, title, date }) {
+  const item = document.createElement('div');
+  item.className = 'session-item';
+  item.dataset.id = id;
+  if (id === activeSessionId) item.classList.add('active');
+  const sess = sessions.get(id);
+  if (sess && sess.busy) item.classList.add('busy');
+
+  const t = document.createElement('span');
+  t.className = 'sess-title';
+  t.textContent = title;
+  item.appendChild(t);
+
+  if (date) {
+    const d = document.createElement('span');
+    d.className = 'sess-date';
+    d.textContent = date;
+    item.appendChild(d);
+  }
+
+  item.addEventListener('click', () => loadSession(id));
+  $sessionList.appendChild(item);
+}
+
+async function refreshSessionList() {
+  try {
+    const resp = await fetch('/api/sessions');
+    if (resp.ok) serverSessionList = await resp.json();
+  } catch (_) {}
+  renderSessionList();
+}
+
+async function loadSession(id) {
+  if (!sessions.has(id)) {
+    const pane = createPane(id);
+    sessions.set(id, { id, history: [], busy: false, pane, title: null });
+
+    try {
+      const resp = await fetch('/api/session?id=' + encodeURIComponent(id));
+      if (resp.ok) {
+        const data = await resp.json();
+        const sess = sessions.get(id);
+        if (sess && Array.isArray(data.history)) {
+          sess.history = data.history;
+          for (const msg of data.history) {
+            if (msg.role === 'user') {
+              addMsg(pane, 'user', msg.content || '');
+              if (!sess.title && msg.content) sess.title = msg.content.slice(0, 60);
+            } else if (msg.role === 'assistant') {
+              addMsg(pane, 'assistant', msg.content || '(used tools)');
+            } else if (msg.role === 'tool') {
+              addMsg(pane, 'tool', msg.content || '', 'tool result');
+            }
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  switchSession(id);
+  renderSessionList();
+}
+
+function newSession() {
+  const id = createLocalSession();
+  renderSessionList();
+  switchSession(id);
+  $input.focus();
+  return id;
+}
+
+// ── streaming ──────────────────────────────────────────────────────────────
+// Each call is fully independent: own fetch, own reader, own closure variables.
+// Concurrent calls for different sessions do not share any state.
+async function streamChat(messages, sessionId, onText, onMeta) {
   const sel = selectedModel();
   const resp = await fetch('/api/chat', {
-    method:  'POST',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
+    body: JSON.stringify({
       messages,
-      provider: sel ? sel.provider : undefined,
-      model:    sel ? sel.model : undefined,
+      provider:      sel ? sel.provider : undefined,
+      model:         sel ? sel.model    : undefined,
+      session_start: sessionId,
     }),
   });
 
@@ -319,23 +548,23 @@ async function streamChat(messages, onText, onMeta) {
 
   const reader  = resp.body.getReader();
   const decoder = new TextDecoder();
-  let   buffer  = '';
+  let   buf     = '';
   const result  = { text: '', tool_calls: [], meta: null };
 
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop();
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop();
     for (const line of lines) {
       if (!line.startsWith('data:')) continue;
       const raw = line.slice(5).trim();
       if (!raw) continue;
       let ev;
       try { ev = JSON.parse(raw); } catch (_) { continue; }
-      if (ev.type === 'meta') { result.meta = ev; if (onMeta) onMeta(ev); }
-      else if (ev.type === 'text') { result.text += ev.text; if (onText) onText(result.text); }
+      if      (ev.type === 'meta')  { result.meta = ev; if (onMeta) onMeta(ev); }
+      else if (ev.type === 'text')  { result.text += ev.text; if (onText) onText(result.text); }
       else if (ev.type === 'tool')  result.tool_calls.push({ id: ev.id, name: ev.name, input: ev.input });
       else if (ev.type === 'error') throw new Error(ev.error);
     }
@@ -344,137 +573,140 @@ async function streamChat(messages, onText, onMeta) {
 }
 
 // ── tool execution ─────────────────────────────────────────────────────────
-
 async function executeTool(name, input) {
   const resp = await fetch('/api/tool', {
-    method:  'POST',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ name, input }),
+    body: JSON.stringify({ name, input }),
   });
   return resp.json();
 }
 
-// ── agentic loop ───────────────────────────────────────────────────────────
+// ── per-session agentic loop ───────────────────────────────────────────────
+// All reads/writes are scoped to sessId. Calling this for sessions A and B
+// concurrently is safe: JS event loop multiplexes the awaits, each session
+// uses its own history array and DOM pane. No cross-session state.
+async function agentLoop(sessId, userText) {
+  const sess = sessions.get(sessId);
+  if (!sess) return;
 
-async function agentLoop(userText) {
-  history.push({ role: 'user', content: userText });
+  sess.history.push({ role: 'user', content: userText });
+  addMsg(sess.pane, 'user', userText);
 
-  for (let i = 0; i < MAX_STEPS; i++) {
-    // Show "thinking" placeholder, streamed into as text arrives.
-    const el = addMessage('assistant', '…');
+  for (let step = 0; step < MAX_STEPS; step++) {
+    const el = addMsg(sess.pane, 'assistant', '\u2026');
     el.querySelector('.body').classList.add('thinking');
 
     let result;
     try {
       result = await streamChat(
-        history,
-        (text) => updateMessage(el, text),
+        sess.history,
+        sessId,
+        (text) => updateMsg(el, text),
         (meta) => setModelLabel(el, meta),
       );
     } catch (err) {
-      updateMessage(el, 'Error: ' + err.message);
+      updateMsg(el, 'Error: ' + err.message);
       return;
     }
 
     const text      = result.text.trim();
     const toolCalls = result.tool_calls.filter(tc => tc && tc.name);
 
-    if (text) updateMessage(el, text);
-    else if (result.meta) updateMessage(el, '(no text — used tools)');
-    else      el.remove();
+    if (text) updateMsg(el, text);
+    else if (toolCalls.length) updateMsg(el, '(using tools\u2026)');
+    else el.remove();
 
-    // Record the assistant turn in the unified format.
     if (text || toolCalls.length) {
-      history.push({ role: 'assistant', content: text, tool_calls: toolCalls });
+      sess.history.push({ role: 'assistant', content: text, tool_calls: toolCalls });
     }
 
     if (!toolCalls.length) { updateContext(); break; }
 
-    // Execute each tool and append its result.
     for (const tc of toolCalls) {
-      const preview = JSON.stringify(tc.input, null, 2);
-      const toolEl  = addMessage('tool', preview, tc.name);
-
+      const preview    = JSON.stringify(tc.input, null, 2);
+      const toolEl     = addMsg(sess.pane, 'tool', preview, tc.name);
       const toolResult = await executeTool(tc.name, tc.input);
       const output     = JSON.stringify(toolResult, null, 2);
-      updateMessage(toolEl, preview + '\n\n→ ' + output);
-
-      history.push({ role: 'tool', tool_call_id: tc.id, content: output });
+      updateMsg(toolEl, preview + '\n\n\u2192 ' + output);
+      sess.history.push({ role: 'tool', tool_call_id: tc.id, content: output });
     }
     updateContext();
   }
 }
 
-// ── UI events ──────────────────────────────────────────────────────────────
 
+// ── send ───────────────────────────────────────────────────────────────────
 async function send() {
   const text = $input.value.trim();
-  if (!text || busy) return;
-  busy = true;
-  $sendBtn.disabled = true;
+  if (!text) return;
+
+  if (!activeSessionId || !sessions.has(activeSessionId)) newSession();
+  const sessId = activeSessionId;
+  const sess   = sessions.get(sessId);
+  if (!sess || sess.busy) return;
+
+  if (!sess.title) {
+    sess.title = text.slice(0, 60);
+    refreshSessionItem(sessId);
+  }
+
   $input.value = '';
   $input.style.height = 'auto';
-  addMessage('user', text);
-  setStatus('thinking…');
+  sess.busy = true;
+  $sendBtn.disabled = true;
+  setStatus('thinking\u2026');
+  refreshSessionItem(sessId);
+
   try {
-    await agentLoop(text);
+    await agentLoop(sessId, text);
     setStatus('ready', 'ok');
   } catch (e) {
     setStatus('error: ' + e.message, 'err');
   }
-  busy = false;
-  $sendBtn.disabled = false;
-  $input.focus();
+
+  sess.busy = false;
+  refreshSessionItem(sessId);
+  refreshSessionList();
+
+  if (activeSessionId === sessId) {
+    $sendBtn.disabled = false;
+    $input.focus();
+  }
+  updateContext();
 }
 
 $sendBtn.addEventListener('click', send);
-
 $input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
-
 $input.addEventListener('input', () => {
   $input.style.height = 'auto';
   $input.style.height = Math.min($input.scrollHeight, 200) + 'px';
 });
-
 $picker.addEventListener('change', updateContext);
+document.getElementById('new-session-btn').addEventListener('click', newSession);
 
 $clearBtn.addEventListener('click', () => {
-  history = [];
-  $messages.innerHTML = '';
-  setStatus('ready', 'ok');
+  if (!activeSessionId) return;
+  const sess = sessions.get(activeSessionId);
+  if (!sess || sess.busy) return;
+  sess.history = [];
+  sess.title   = null;
+  sess.pane.innerHTML = '';
+  renderSessionList();
   updateContext();
+  setStatus('ready', 'ok');
 });
 
-// ── copilot sign-in (GitHub device flow, streamed over SSE) ─────────────────
-
-// Load the provider/model list and (re)build the picker. Every configured or
-// reachable provider contributes its models; the rest simply don't appear, so
-// the app works with whatever is available. Copilot shows a sign-in button
-// until it has models.
-async function refreshConfig() {
-  try {
-    const cfg = await fetch('/api/config').then(r => r.json());
-    const list = cfg.providers || [];
-    buildPicker(list);
-    const copilot = list.find(p => p.id === 'copilot');
-    $loginBtn.style.display = (copilot && (!copilot.models || !copilot.models.length)) ? '' : 'none';
-    const total = list.reduce((n, p) => n + ((p.models && p.models.length) || 0), 0);
-    if (total) setStatus('ready', 'ok');
-    else       setStatus('no providers configured — set an API key, start Ollama, or sign in', 'err');
-    updateContext();
-  } catch (e) {
-    setStatus('server error', 'err');
-  }
-}
-
-// Build the "enter this code" prompt with a real, clickable link (no innerHTML
-// from server data, so the user_code / URL can't inject markup).
+// ── copilot sign-in ────────────────────────────────────────────────────────
 function showLoginPrompt(userCode, verificationUri) {
-  const el = addMessage('assistant', '');
+  const sess = activeSessionId ? sessions.get(activeSessionId) : null;
+  const pane = (sess && sess.pane) || $msgContainer;
+  const el   = document.createElement('div');
+  el.className = 'msg assistant';
+  el.innerHTML = '<div class="label">Assistant</div><div class="body"></div>';
   const body = el.querySelector('.body');
-  body.textContent = '';
   body.append('Sign in to GitHub Copilot:', document.createElement('br'), document.createElement('br'), '1. Open ');
   if (/^https:\/\//.test(verificationUri)) {
     const a = document.createElement('a');
@@ -486,35 +718,33 @@ function showLoginPrompt(userCode, verificationUri) {
   }
   const code = document.createElement('strong');
   code.textContent = userCode;
-  body.append(
-    document.createElement('br'),
-    '2. Enter the code: ', code,
+  body.append(document.createElement('br'), '2. Enter the code: ', code,
     document.createElement('br'), document.createElement('br'),
-    'A browser window should have opened automatically. Waiting for you to authorize…',
-  );
+    'A browser window should have opened automatically. Waiting for you to authorize\u2026');
+  pane.appendChild(el);
   el.scrollIntoView({ block: 'end' });
   return el;
 }
 
 async function signInCopilot() {
-  if (busy) return;
-  busy = true;
+  const sess = activeSessionId ? sessions.get(activeSessionId) : null;
+  if (sess && sess.busy) return;
   $loginBtn.disabled = true;
-  $sendBtn.disabled = true;
-  setStatus('starting GitHub sign-in…');
+  $sendBtn.disabled  = true;
+  setStatus('starting GitHub sign-in\u2026');
   let promptEl = null;
   try {
     const resp = await fetch('/api/login', { method: 'POST' });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const reader  = resp.body.getReader();
     const decoder = new TextDecoder();
-    let   buffer  = '';
+    let   buf     = '';
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
       for (const line of lines) {
         if (!line.startsWith('data:')) continue;
         const raw = line.slice(5).trim();
@@ -522,30 +752,51 @@ async function signInCopilot() {
         let ev;
         try { ev = JSON.parse(raw); } catch (_) { continue; }
         if (ev.type === 'prompt') {
-          setStatus('waiting for GitHub authorization…');
+          setStatus('waiting for GitHub authorization\u2026');
           promptEl = showLoginPrompt(ev.user_code, ev.verification_uri);
         } else if (ev.type === 'error') {
           throw new Error(ev.error);
         }
       }
     }
-    if (promptEl) updateMessage(promptEl, 'Signed in to GitHub Copilot ✓');
+    if (promptEl) updateMsg(promptEl, 'Signed in to GitHub Copilot \u2713');
     await refreshConfig();
   } catch (e) {
-    if (promptEl) updateMessage(promptEl, 'Sign-in failed: ' + e.message);
+    if (promptEl) updateMsg(promptEl, 'Sign-in failed: ' + e.message);
     setStatus('sign-in failed: ' + e.message, 'err');
   } finally {
-    busy = false;
     $loginBtn.disabled = false;
-    $sendBtn.disabled = false;
+    const activeSess = activeSessionId ? sessions.get(activeSessionId) : null;
+    $sendBtn.disabled = !!(activeSess && activeSess.busy);
   }
 }
 
 $loginBtn.addEventListener('click', signInCopilot);
 
-// ── init ───────────────────────────────────────────────────────────────────
+// ── config + init ──────────────────────────────────────────────────────────
+async function refreshConfig() {
+  try {
+    const cfg  = await fetch('/api/config').then(r => r.json());
+    const list = cfg.providers || [];
+    buildPicker(list);
+    const copilot = list.find(p => p.id === 'copilot');
+    $loginBtn.style.display = (copilot && (!copilot.models || !copilot.models.length)) ? '' : 'none';
+    const total = list.reduce((n, p) => n + ((p.models && p.models.length) || 0), 0);
+    if (total) setStatus('ready', 'ok');
+    else       setStatus('no providers configured \u2014 set an API key, start Ollama, or sign in', 'err');
+    updateContext();
+  } catch (e) {
+    setStatus('server error', 'err');
+  }
+}
 
-refreshConfig();
+async function init() {
+  await refreshConfig();
+  await refreshSessionList();
+  newSession();
+}
+
+init();
 </script>
 </body>
 </html>
