@@ -46,6 +46,7 @@ Then open http://localhost:3000 in your browser.
 | `OLLAMA_MODEL` | `llama3.1` | Model for the ollama provider |
 | `COPILOT_MODEL` | `gpt-4o` | Model for the copilot provider |
 | `GITHUB_COPILOT_TOKEN` | — | GitHub OAuth token for Copilot; overrides `--login` and the editor plugin config |
+| `COPILOT_DEBUG` | — | Set to `1` to log Copilot auth/token-exchange details to stderr (see [Copilot sign-in](#github-copilot-sign-in)) |
 | `SYSTEM_PROMPT` | built-in | Override the agent's system prompt |
 | `PORT` | `3000` | HTTP port |
 
@@ -91,6 +92,34 @@ enabled for Copilot. If cake used one of those, the token exchange would fail
 with a `404` even right after a successful sign-in. When that happens, run
 `node server.js --login` (or unset `GITHUB_TOKEN` / `GH_TOKEN`) so cake uses your
 Copilot-enabled token instead.
+
+### Debugging the token exchange
+
+cake obtains a Copilot session token by exchanging a GitHub OAuth token at
+`GET https://api.github.com/copilot_internal/v2/token`. That endpoint answers
+`404 Not Found` when the OAuth token is otherwise valid but **not entitled to
+Copilot** — so the interesting question is always *which* token cake sent.
+
+Every failed exchange logs one line to stderr naming the token's **source** and
+a safe **fingerprint** (its kind and length — never the secret itself), e.g.:
+
+```
+[copilot] token exchange ← HTTP 404 | x-github-request-id: … | body: {"message":"Not Found",…}
+```
+
+The same detail is appended to the error shown in the UI:
+`… [oauth source: ambient GITHUB_TOKEN; oauth token: ghp_ (40 chars); x-github-request-id: …]`.
+A `ghu_` prefix is a device-flow login token (what you want); `ghp_` or
+`github_pat_` is a personal access token, and `gho_` a plain OAuth token —
+neither is Copilot-enabled, and seeing one here means that source is winning and
+should be removed or overridden.
+
+For the full picture — every request, response, and the device-flow login steps —
+set `COPILOT_DEBUG=1`:
+
+```bash
+COPILOT_DEBUG=1 PROVIDER=copilot node server.js
+```
 
 ## Architecture
 
