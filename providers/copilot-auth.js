@@ -34,6 +34,41 @@ const DEVICE_CODE = { hostname: 'github.com', path: '/login/device/code' };
 const ACCESS_TOKEN = { hostname: 'github.com', path: '/login/oauth/access_token' };
 const GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
 
+// ── diagnostics ─────────────────────────────────────────────────────────────
+//
+// Copilot auth failures (especially the token-exchange 404) are hard to debug
+// blind: the same code path can send a device-flow token, an editor-plugin
+// token, or an ambient GITHUB_TOKEN, and only one of them is Copilot-enabled.
+// These helpers let the provider narrate what it is doing without ever leaking
+// a secret.
+
+// Verbose logging is opt-in via COPILOT_DEBUG (any truthy value) or a DEBUG
+// value that mentions "copilot". Failure diagnostics are logged regardless (see
+// the `force` argument to log()).
+function debugEnabled() {
+  const flag = process.env.COPILOT_DEBUG;
+  if (flag && flag !== '0' && flag.toLowerCase() !== 'false') return true;
+  return /(^|[,\s])copilot([,\s]|$)/i.test(process.env.DEBUG || '');
+}
+
+// Log a namespaced line to stderr. `force` bypasses the debug gate so failures
+// are always visible, even without COPILOT_DEBUG set.
+function log(msg, force) {
+  if (force || debugEnabled()) console.error('[copilot] ' + msg);
+}
+
+// A safe, non-secret fingerprint of a token: its recognizable prefix — which
+// reveals the *kind* of token (a device-flow `ghu_`, an OAuth `gho_`, or a
+// personal-access `ghp_` / `github_pat_` that is not Copilot-enabled) — plus
+// its length. Never returns the token itself, so it is safe to log or surface.
+function fingerprint(token) {
+  if (!token) return '(none)';
+  const s = String(token);
+  const known = ['github_pat_', 'gho_', 'ghu_', 'ghp_', 'ghs_', 'ghr_'];
+  const prefix = known.find((p) => s.startsWith(p)) || (s.slice(0, 4) + '…');
+  return prefix + ' (' + s.length + ' chars)';
+}
+
 // Where cake stores its own copy of the OAuth token. Deliberately separate
 // from the editor plugins' ~/.config/github-copilot files so we never clobber
 // them.
@@ -76,11 +111,14 @@ function postJson(target, payload) {
 // Step 1 — ask GitHub for a device + user code.
 // -> { device_code, user_code, verification_uri, expires_in, interval }
 async function requestDeviceCode() {
+  log('device code → POST https://' + DEVICE_CODE.hostname + DEVICE_CODE.path);
   const { status, body } = await postJson(DEVICE_CODE, { client_id: CLIENT_ID, scope: 'read:user' });
   if (status !== 200 || !body.device_code) {
     throw new Error('Device code request failed (' + status + '): '
       + (body.error_description || body.error || JSON.stringify(body)));
   }
+  log('device code ← HTTP ' + status + ' | verify at ' + body.verification_uri
+    + ' | interval ' + body.interval + 's | expires in ' + body.expires_in + 's');
   return body;
 }
 
@@ -90,12 +128,16 @@ async function pollForToken(deviceCode, intervalSeconds) {
   let interval = (intervalSeconds || 5) * 1000;
   for (;;) {
     await sleep(interval);
-    const { body } = await postJson(ACCESS_TOKEN, {
+    const { status, body } = await postJson(ACCESS_TOKEN, {
       client_id: CLIENT_ID,
       device_code: deviceCode,
       grant_type: GRANT_TYPE,
     });
-    if (body.access_token) return body.access_token;
+    if (body.access_token) {
+      log('access token ← HTTP ' + status + ' | obtained OAuth token ' + fingerprint(body.access_token));
+      return body.access_token;
+    }
+    log('access token ← HTTP ' + status + ' | ' + (body.error || 'no token yet'));
     switch (body.error) {
       case 'authorization_pending': break;         // not approved yet — keep waiting
       case 'slow_down': interval += 5000; break;    // GitHub asked us to back off
@@ -128,6 +170,7 @@ function saveToken(token) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ oauth_token: token }, null, 2) + '\n', { mode: 0o600 });
   try { fs.chmodSync(file, 0o600); } catch (_) { /* tighten perms if it already existed */ }
+  log('saved OAuth token ' + fingerprint(token) + ' to ' + file);
   return file;
 }
 
@@ -163,4 +206,7 @@ module.exports = {
   saveToken,
   readSavedToken,
   login,
+  log,
+  debugEnabled,
+  fingerprint,
 };
