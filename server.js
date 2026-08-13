@@ -110,6 +110,29 @@ function handleChat(body, res) {
   });
 }
 
+// ── copilot login: device flow relayed to the browser as SSE ────────────────
+
+function handleLogin(res) {
+  const auth = require('./providers/copilot-auth');
+  res.writeHead(200, Object.assign({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  }, CORS));
+  auth.login({
+    onPrompt({ user_code, verification_uri }) {
+      auth.openBrowser(verification_uri);
+      sendEvent(res, { type: 'prompt', user_code, verification_uri });
+    },
+  }).then(() => {
+    sendEvent(res, { type: 'done' });
+    res.end();
+  }).catch((e) => {
+    sendEvent(res, { type: 'error', error: e.message });
+    res.end();
+  });
+}
+
 // ── router ──────────────────────────────────────────────────────────────────
 
 function readBody(req, cb) {
@@ -124,6 +147,34 @@ function readBody(req, cb) {
 function sendJson(res, obj) {
   res.writeHead(200, Object.assign({ 'Content-Type': 'application/json' }, CORS));
   res.end(JSON.stringify(obj));
+}
+
+// ── entry point ──────────────────────────────────────────────────────────────
+
+// `node server.js --login` runs the GitHub Copilot device-flow login and exits
+// instead of starting the server.
+function runLogin() {
+  const auth = require('./providers/copilot-auth');
+  auth.login({
+    onPrompt({ user_code, verification_uri }) {
+      console.log('\nTo sign in to GitHub Copilot:');
+      console.log('  1. Open ' + verification_uri);
+      console.log('  2. Enter the code: ' + user_code);
+      console.log('\nWaiting for authorization…');
+      auth.openBrowser(verification_uri);
+    },
+  }).then(({ file }) => {
+    console.log('\n✓ Signed in to GitHub Copilot. Token saved to ' + file);
+    process.exit(0);
+  }).catch((err) => {
+    console.error('\nLogin failed: ' + err.message);
+    process.exit(1);
+  });
+}
+
+if (process.argv.includes('--login')) {
+  runLogin();
+  return;
 }
 
 const server = http.createServer((req, res) => {
@@ -149,6 +200,11 @@ const server = http.createServer((req, res) => {
       if (err) { res.writeHead(400); res.end('Bad JSON'); return; }
       tools.run(body.name, body.input || {}).then((result) => sendJson(res, result));
     });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/login') {
+    handleLogin(res);
     return;
   }
 

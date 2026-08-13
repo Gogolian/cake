@@ -86,7 +86,8 @@ Upstream/transport failures become `{ type: 'error', error }` automatically.
 | `ollama.js` | Local Ollama | OpenAI-compatible; `OLLAMA_URL` / `OLLAMA_MODEL` |
 | `copilot.js` | GitHub Copilot | OpenAI-compatible + OAuth→session token exchange (experimental) |
 
-`openai-compatible.js` and `util.js` are shared helpers, not providers.
+`openai-compatible.js`, `util.js`, and `copilot-auth.js` (GitHub device-flow
+login used by `copilot.js`) are shared helpers, not providers.
 
 > **Bedrock / other event-stream APIs:** the interface already fits them —
 > sign the request inside `buildRequest` and decode the wire format inside

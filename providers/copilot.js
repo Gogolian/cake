@@ -8,6 +8,7 @@
 //
 // OAuth token is read from (in order):
 //   - env GITHUB_COPILOT_TOKEN / GH_COPILOT_TOKEN / GITHUB_TOKEN / GH_TOKEN
+//   - the token cake saved via `node server.js --login` (device flow)
 //   - ~/.config/github-copilot/apps.json or hosts.json (the files the
 //     official Copilot editor plugins write)
 //
@@ -19,13 +20,7 @@ const os = require('os');
 const path = require('path');
 
 const { createOpenAICompatible } = require('./openai-compatible');
-
-const EDITOR_HEADERS = {
-  'Editor-Version': 'cake/0.1.0',
-  'Editor-Plugin-Version': 'cake/0.1.0',
-  'Copilot-Integration-Id': 'vscode-chat',
-  'User-Agent': 'cake/0.1.0',
-};
+const { EDITOR_HEADERS, readSavedToken } = require('./copilot-auth');
 
 let session = null; // { token, expiresAt } cached session token
 
@@ -33,6 +28,10 @@ function readOAuthToken() {
   const envToken = process.env.GITHUB_COPILOT_TOKEN || process.env.GH_COPILOT_TOKEN
     || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (envToken) return envToken;
+
+  // Token obtained through cake's own device-flow login.
+  const saved = readSavedToken();
+  if (saved) return saved;
 
   const dir = path.join(os.homedir(), '.config', 'github-copilot');
   for (const name of ['apps.json', 'hosts.json']) {
@@ -67,7 +66,10 @@ function fetchSessionToken(oauth) {
       res.on('data', (d) => { body += d; });
       res.on('end', () => {
         if (res.statusCode !== 200) {
-          reject(new Error('Copilot token exchange failed (' + res.statusCode + '): ' + body));
+          const hint = res.statusCode === 401
+            ? ' — the GitHub token is invalid or expired; run `node server.js --login` to sign in again.'
+            : '';
+          reject(new Error('Copilot token exchange failed (' + res.statusCode + '): ' + body + hint));
           return;
         }
         try { resolve(JSON.parse(body)); }
@@ -85,7 +87,7 @@ async function getSessionToken() {
 
   const oauth = readOAuthToken();
   if (!oauth) {
-    throw new Error('No GitHub Copilot token found. Set GITHUB_COPILOT_TOKEN or sign in with an editor Copilot plugin.');
+    throw new Error('No GitHub Copilot token found. Run `node server.js --login` to sign in, set GITHUB_COPILOT_TOKEN, or sign in with an editor Copilot plugin.');
   }
   const data = await fetchSessionToken(oauth);
   session = { token: data.token, expiresAt: data.expires_at || (now + 300) };
