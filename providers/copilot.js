@@ -97,13 +97,14 @@ function fetchSessionToken(oauth, source) {
       res.on('data', (d) => { body += d; });
       res.on('end', () => {
         const requestId = res.headers['x-github-request-id'] || '(none)';
-        // Always surface the raw exchange result on failure; keep the success
-        // path quiet unless COPILOT_DEBUG is set.
-        log('token exchange ← HTTP ' + res.statusCode
-          + ' | x-github-request-id: ' + requestId
-          + ' | body: ' + body, res.statusCode !== 200);
 
         if (res.statusCode !== 200) {
+          // Failure bodies are error JSON (e.g. the 404 "Not Found") with no
+          // secret in them, so always surface them — that is the whole point of
+          // the extra logging.
+          log('token exchange ← HTTP ' + res.statusCode
+            + ' | x-github-request-id: ' + requestId + ' | body: ' + body, true);
+
           let hint = '';
           if (res.statusCode === 401) {
             hint = ' — the GitHub token is invalid or expired; run `node server.js --login` to sign in again.';
@@ -123,10 +124,14 @@ function fetchSessionToken(oauth, source) {
           reject(new Error('Copilot token exchange failed (' + res.statusCode + '): ' + body + hint + context));
           return;
         }
+
         let data;
         try { data = JSON.parse(body); }
         catch (e) { reject(new Error('Copilot token exchange returned invalid JSON')); return; }
-        log('token exchange ok | copilot session token: ' + fingerprint(data.token)
+        // Never log the raw success body: it carries the Copilot session token.
+        // Report only its redacted fingerprint and expiry.
+        log('token exchange ← HTTP 200 | x-github-request-id: ' + requestId
+          + ' | copilot session token: ' + fingerprint(data.token)
           + ' | expires_at: ' + (data.expires_at || '(default)'));
         resolve(data);
       });

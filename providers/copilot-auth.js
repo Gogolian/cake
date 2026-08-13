@@ -60,12 +60,13 @@ function log(msg, force) {
 // A safe, non-secret fingerprint of a token: its recognizable prefix — which
 // reveals the *kind* of token (a device-flow `ghu_`, an OAuth `gho_`, or a
 // personal-access `ghp_` / `github_pat_` that is not Copilot-enabled) — plus
-// its length. Never returns the token itself, so it is safe to log or surface.
+// its length. Only ever returns a fixed label and a length, never any bytes of
+// the token itself, so it is safe to log or surface.
 function fingerprint(token) {
   if (!token) return '(none)';
   const s = String(token);
   const known = ['github_pat_', 'gho_', 'ghu_', 'ghp_', 'ghs_', 'ghr_'];
-  const prefix = known.find((p) => s.startsWith(p)) || (s.slice(0, 4) + '…');
+  const prefix = known.find((p) => s.startsWith(p)) || 'unrecognized-prefix';
   return prefix + ' (' + s.length + ' chars)';
 }
 
