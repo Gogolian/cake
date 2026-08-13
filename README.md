@@ -23,7 +23,8 @@ node server.js
 # Ollama (local, no key) — needs a running Ollama server
 PROVIDER=ollama OLLAMA_MODEL=llama3.1 node server.js
 
-# GitHub Copilot (experimental) — needs an editor Copilot login or token
+# GitHub Copilot (experimental) — sign in with your GitHub account
+node server.js --login
 PROVIDER=copilot node server.js
 
 # Custom port
@@ -44,13 +45,45 @@ Then open http://localhost:3000 in your browser.
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Base URL of the Ollama server |
 | `OLLAMA_MODEL` | `llama3.1` | Model for the ollama provider |
 | `COPILOT_MODEL` | `gpt-4o` | Model for the copilot provider |
-| `GITHUB_COPILOT_TOKEN` | — | GitHub OAuth token for Copilot (else read from the editor plugin config) |
+| `GITHUB_COPILOT_TOKEN` | — | GitHub OAuth token for Copilot; overrides `--login` and the editor plugin config |
 | `SYSTEM_PROMPT` | built-in | Override the agent's system prompt |
 | `PORT` | `3000` | HTTP port |
 
 When `PROVIDER` is not set, the first configured key-based provider is used
 (anthropic → openai → copilot). `ollama` and `copilot` can also be selected
 explicitly with `PROVIDER`.
+
+## GitHub Copilot sign-in
+
+Copilot needs a GitHub OAuth token. The easiest way to get one is to sign in
+with your GitHub account using the OAuth **device flow** — no token to copy and
+no editor plugin required:
+
+```bash
+node server.js --login
+```
+
+cake prints a short one-time code and opens <https://github.com/login/device>
+in your browser. Enter the code, approve access, and the token is saved to
+`~/.config/cake/copilot.json` (created readable only by you). Then start the
+server as usual:
+
+```bash
+PROVIDER=copilot node server.js
+```
+
+You can also sign in from the web UI: run `PROVIDER=copilot node server.js`,
+open the app, and click **Sign in to GitHub Copilot**.
+
+cake looks for a Copilot token in this order:
+
+1. `GITHUB_COPILOT_TOKEN` (or the `GH_COPILOT_TOKEN` / `GITHUB_TOKEN` /
+   `GH_TOKEN` fallbacks),
+2. the token saved by `--login`,
+3. the official editor plugins' `~/.config/github-copilot` files.
+
+So `GITHUB_COPILOT_TOKEN` always overrides a saved login. If the token expires
+or is revoked, just run `node server.js --login` again.
 
 ## Architecture
 

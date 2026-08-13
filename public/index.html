@@ -105,6 +105,8 @@
     #clear-btn { background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
     .thinking { color: var(--muted); font-style: italic; }
     .tool-name { color: var(--accent); font-weight: 700; }
+    #login-btn { margin-left: 12px; padding: 6px 12px; font-size: 12px; }
+    a { color: var(--accent); }
   </style>
 </head>
 <body>
@@ -112,6 +114,7 @@
   <span>🎂</span>
   <h1>cake</h1>
   <span id="status">connecting…</span>
+  <button id="login-btn" style="display:none">Sign in to GitHub Copilot</button>
 </header>
 <div id="messages"></div>
 <footer>
@@ -141,6 +144,7 @@ const $input    = document.getElementById('input');
 const $sendBtn  = document.getElementById('send-btn');
 const $clearBtn = document.getElementById('clear-btn');
 const $status   = document.getElementById('status');
+const $loginBtn = document.getElementById('login-btn');
 
 // ── utilities ──────────────────────────────────────────────────────────────
 
@@ -314,18 +318,98 @@ $clearBtn.addEventListener('click', () => {
   setStatus('ready', 'ok');
 });
 
-// ── init ───────────────────────────────────────────────────────────────────
+// ── copilot sign-in (GitHub device flow, streamed over SSE) ─────────────────
 
-(async () => {
+async function refreshConfig() {
   try {
     const cfg = await fetch('/api/config').then(r => r.json());
     const name = cfg.label || cfg.provider || 'unknown';
     if (cfg.configured) setStatus('ready — ' + name + ' · ' + cfg.model, 'ok');
     else                setStatus(name + ' not configured — set an API key', 'err');
+    // Offer in-app sign-in only when the Copilot provider is active.
+    $loginBtn.style.display = cfg.provider === 'copilot' ? '' : 'none';
   } catch (e) {
     setStatus('server error', 'err');
   }
-})();
+}
+
+// Build the "enter this code" prompt with a real, clickable link (no innerHTML
+// from server data, so the user_code / URL can't inject markup).
+function showLoginPrompt(userCode, verificationUri) {
+  const el = addMessage('assistant', '');
+  const body = el.querySelector('.body');
+  body.textContent = '';
+  body.append('Sign in to GitHub Copilot:', document.createElement('br'), document.createElement('br'), '1. Open ');
+  if (/^https:\/\//.test(verificationUri)) {
+    const a = document.createElement('a');
+    a.href = verificationUri; a.textContent = verificationUri;
+    a.target = '_blank'; a.rel = 'noopener';
+    body.append(a);
+  } else {
+    body.append(String(verificationUri));
+  }
+  const code = document.createElement('strong');
+  code.textContent = userCode;
+  body.append(
+    document.createElement('br'),
+    '2. Enter the code: ', code,
+    document.createElement('br'), document.createElement('br'),
+    'A browser window should have opened automatically. Waiting for you to authorize…',
+  );
+  el.scrollIntoView({ block: 'end' });
+  return el;
+}
+
+async function signInCopilot() {
+  if (busy) return;
+  busy = true;
+  $loginBtn.disabled = true;
+  $sendBtn.disabled = true;
+  setStatus('starting GitHub sign-in…');
+  let promptEl = null;
+  try {
+    const resp = await fetch('/api/login', { method: 'POST' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trim();
+        if (!raw) continue;
+        let ev;
+        try { ev = JSON.parse(raw); } catch (_) { continue; }
+        if (ev.type === 'prompt') {
+          setStatus('waiting for GitHub authorization…');
+          promptEl = showLoginPrompt(ev.user_code, ev.verification_uri);
+        } else if (ev.type === 'error') {
+          throw new Error(ev.error);
+        }
+      }
+    }
+    if (promptEl) updateMessage(promptEl, 'Signed in to GitHub Copilot ✓');
+    await refreshConfig();
+  } catch (e) {
+    if (promptEl) updateMessage(promptEl, 'Sign-in failed: ' + e.message);
+    setStatus('sign-in failed: ' + e.message, 'err');
+  } finally {
+    busy = false;
+    $loginBtn.disabled = false;
+    $sendBtn.disabled = false;
+  }
+}
+
+$loginBtn.addEventListener('click', signInCopilot);
+
+// ── init ───────────────────────────────────────────────────────────────────
+
+refreshConfig();
 </script>
 </body>
 </html>
