@@ -59,15 +59,21 @@ function log(msg, force) {
 
 // A safe, non-secret fingerprint of a token: its recognizable prefix — which
 // reveals the *kind* of token (a device-flow `ghu_`, an OAuth `gho_`, or a
-// personal-access `ghp_` / `github_pat_` that is not Copilot-enabled) — plus
-// its length. Only ever returns a fixed label and a length, never any bytes of
-// the token itself, so it is safe to log or surface.
+// personal-access `ghp_` / `github_pat_` that is not Copilot-enabled) — plus a
+// coarse size band. Both are fixed labels chosen by comparison, so no byte or
+// length of the token itself is ever emitted: safe to log or surface.
 function fingerprint(token) {
   if (!token) return '(none)';
   const s = String(token);
   const known = ['github_pat_', 'gho_', 'ghu_', 'ghp_', 'ghs_', 'ghr_'];
-  const prefix = known.find((p) => s.startsWith(p)) || 'unrecognized-prefix';
-  return prefix + ' (' + s.length + ' chars)';
+  const kind = known.find((p) => s.startsWith(p)) || 'unrecognized-prefix';
+  // Bucket the length via comparisons only — the exact count is never emitted,
+  // but a wildly wrong size (e.g. an empty or newline-mangled token) still shows.
+  const size = s.length < 20 ? 'under 20 chars'
+    : s.length <= 50 ? '20-50 chars'
+      : s.length <= 100 ? '51-100 chars'
+        : 'over 100 chars';
+  return kind + ' (' + size + ')';
 }
 
 // Where cake stores its own copy of the OAuth token. Deliberately separate

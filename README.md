@@ -101,14 +101,15 @@ cake obtains a Copilot session token by exchanging a GitHub OAuth token at
 Copilot** — so the interesting question is always *which* token cake sent.
 
 Every failed exchange logs one line to stderr naming the token's **source** and
-a safe **fingerprint** (its kind and length — never the secret itself), e.g.:
+a safe **fingerprint** (its kind and a coarse size band — never the secret
+itself), e.g.:
 
 ```
 [copilot] token exchange ← HTTP 404 | x-github-request-id: … | body: {"message":"Not Found",…}
 ```
 
 The same detail is appended to the error shown in the UI:
-`… [oauth source: ambient GITHUB_TOKEN; oauth token: ghp_ (40 chars); x-github-request-id: …]`.
+`… [oauth source: ambient GITHUB_TOKEN; oauth token: ghp_ (20-50 chars); x-github-request-id: …]`.
 A `ghu_` prefix is a device-flow login token (what you want); `ghp_` or
 `github_pat_` is a personal access token, and `gho_` a plain OAuth token —
 neither is Copilot-enabled, and seeing one here means that source is winning and
