@@ -79,7 +79,7 @@ Upstream/transport failures become `{ type: 'error', error }` automatically.
 1. Create `providers/<name>.js` exporting the interface above. If your API is
    OpenAI-compatible, reuse `createOpenAICompatible` from
    `openai-compatible.js` and supply only the endpoint + auth (see
-   `openai.js`, `ollama.js`, `copilot.js`).
+   `openai.js`, `openrouter.js`, `ollama.js`, `llamacpp.js`, `copilot.js`).
 2. Register it in `index.js`:
 
    ```js
@@ -94,7 +94,9 @@ Upstream/transport failures become `{ type: 'error', error }` automatically.
 |---|---|---|
 | `anthropic.js` | Anthropic Messages API | Native translation + SSE parser |
 | `openai.js` | OpenAI Chat Completions | Built on `openai-compatible.js` |
+| `openrouter.js` | OpenRouter gateway | OpenAI-compatible; `OPENROUTER_API_KEY`; live model list reports `context_length` |
 | `ollama.js` | Local Ollama | OpenAI-compatible; `OLLAMA_URL` / `OLLAMA_MODEL` |
+| `llamacpp.js` | Local llama.cpp (`llama-server`) | OpenAI-compatible; `LLAMACPP_URL`; context window from `/props` |
 | `copilot.js` | GitHub Copilot | OpenAI-compatible + OAuth→session token exchange (experimental) |
 
 `openai-compatible.js`, `util.js`, and `copilot-auth.js` (GitHub device-flow
