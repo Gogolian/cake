@@ -74,12 +74,14 @@ function createParser() {
 //   isConfigured()      – whether the provider has what it needs to run
 //   endpoint()          – async|sync -> { transport, hostname, port, path }
 //   headers()           – async|sync -> extra request headers (auth, etc.)
+//   listModels()        – optional async -> [{ id, maxContext }] for the picker
 function createOpenAICompatible(config) {
   return {
     id: config.id,
     label: config.label,
     isConfigured: config.isConfigured,
     model: config.model,
+    listModels: config.listModels || (async () => []),
 
     async buildRequest({ messages, tools, system, model, maxTokens }) {
       const payload = {

@@ -3,7 +3,15 @@
 // Anthropic Messages API provider.
 // https://docs.anthropic.com/en/api/messages
 
-const { safeParse, resolveSystem } = require('./util');
+const { safeParse, resolveSystem, getJson } = require('./util');
+
+// Curated fallback list (context window is 200K for current Claude models).
+// Used when the live /v1/models call is unavailable so the picker still works.
+const KNOWN_MODELS = [
+  { id: 'claude-opus-4-5', maxContext: 200000 },
+  { id: 'claude-sonnet-4-5', maxContext: 200000 },
+  { id: 'claude-3-5-haiku-latest', maxContext: 200000 },
+];
 
 // Unified message history -> Anthropic `messages` array.
 // Consecutive tool results are merged into a single user turn, as the API
@@ -46,6 +54,29 @@ module.exports = {
 
   model() {
     return process.env.ANTHROPIC_MODEL || 'claude-opus-4-5';
+  },
+
+  // Discover models from the live API, falling back to the curated list. Only
+  // attempted when a key is present; returns [] otherwise so an unconfigured
+  // provider simply doesn't appear in the picker.
+  async listModels() {
+    if (!this.isConfigured()) return [];
+    try {
+      const data = await getJson({
+        transport: 'https',
+        hostname: 'api.anthropic.com',
+        path: '/v1/models?limit=1000',
+        headers: {
+          'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+          'anthropic-version': '2023-06-01',
+        },
+      });
+      const models = (data.data || [])
+        .filter((m) => m && m.id)
+        .map((m) => ({ id: m.id, maxContext: 200000 }));
+      if (models.length) return models;
+    } catch (_) { /* fall back to the curated list below */ }
+    return KNOWN_MODELS;
   },
 
   async buildRequest({ messages, tools, system, model, maxTokens }) {

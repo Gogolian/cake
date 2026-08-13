@@ -54,8 +54,10 @@ function sendEvent(res, obj) {
 
 function handleChat(body, res) {
   let provider;
-  try { provider = providers.select(); }
+  try { provider = providers.select(body.provider); }
   catch (e) { res.writeHead(400, CORS); res.end(e.message); return; }
+
+  const model = body.model || provider.model();
 
   res.writeHead(200, Object.assign({
     'Content-Type': 'text/event-stream',
@@ -63,11 +65,17 @@ function handleChat(body, res) {
     Connection: 'keep-alive',
   }, CORS));
 
+  // Tell the browser which provider/model is actually answering, so it can
+  // annotate the reply. Sent before the upstream call so the label appears
+  // immediately, and so it still reflects reality when the server had to fall
+  // back (e.g. no explicit selection).
+  sendEvent(res, { type: 'meta', provider: provider.id, model });
+
   provider.buildRequest({
     messages: body.messages || [],
     tools: tools.definitions,
     system: body.system,
-    model: body.model,
+    model,
     maxTokens: body.max_tokens,
   }).then((upstreamReq) => {
     const client = upstreamReq.transport === 'http' ? http : https;
@@ -125,6 +133,9 @@ function handleLogin(res) {
       sendEvent(res, { type: 'prompt', user_code, verification_uri });
     },
   }).then(() => {
+    // A fresh token means Copilot's models just became available; drop the
+    // cached snapshot so the next /api/config reflects them.
+    providers.clearCache();
     sendEvent(res, { type: 'done' });
     res.end();
   }).catch((e) => {
@@ -209,15 +220,9 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/api/config') {
-    let provider;
-    try { provider = providers.select(); }
-    catch (e) { sendJson(res, { error: e.message }); return; }
-    sendJson(res, {
-      provider: provider.id,
-      label: provider.label,
-      model: provider.model(),
-      configured: provider.isConfigured(),
-    });
+    providers.available()
+      .then((list) => sendJson(res, { providers: list }))
+      .catch((e) => sendJson(res, { providers: [], error: e.message }));
     return;
   }
 
@@ -225,13 +230,11 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  let info;
-  try {
-    const p = providers.select();
-    info = p.label + ' (' + p.model() + ')' + (p.isConfigured() ? '' : ' — not configured');
-  } catch (e) {
-    info = e.message;
-  }
   console.log('cake listening on http://localhost:' + PORT);
-  console.log('provider: ' + info);
+  // All providers load; report which ones already have credentials/config.
+  // The rest still appear once configured (or, for Copilot, after sign-in).
+  const configured = providers.list().filter((p) => p.isConfigured()).map((p) => p.id);
+  console.log('providers: ' + (configured.length
+    ? configured.join(', ') + ' configured'
+    : 'none configured yet — set an API key, start Ollama, or sign in to Copilot'));
 });

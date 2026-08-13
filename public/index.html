@@ -39,7 +39,27 @@
       gap: 12px;
     }
     header h1 { font-size: 16px; font-weight: 600; }
-    #status { font-size: 12px; color: var(--muted); margin-left: auto; }
+    #model-picker {
+      margin-left: auto;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      max-width: 260px;
+      outline: none;
+    }
+    #model-picker:focus { border-color: var(--accent); }
+    #model-picker:disabled { opacity: .5; }
+    #context {
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      white-space: nowrap;
+    }
+    #status { font-size: 12px; color: var(--muted); }
     #status.ok   { color: #4caf50; }
     #status.err  { color: var(--error); }
     #messages {
@@ -63,6 +83,7 @@
     .msg.assistant { background: var(--assistant-bg); border: 1px solid var(--border); }
     .msg.tool      { background: var(--tool-bg); border: 1px solid var(--tool-border); font-family: var(--font-mono); font-size: 12px; }
     .msg .label    { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+    .msg .label .model { text-transform: none; letter-spacing: 0; color: var(--accent); font-family: var(--font-mono); }
     .msg.tool .label { color: #6dbf67; }
     .msg.user .label { color: #5b9bd5; }
     code, pre { font-family: var(--font-mono); }
@@ -113,6 +134,8 @@
 <header>
   <span>🎂</span>
   <h1>cake</h1>
+  <select id="model-picker" title="Provider / model" disabled></select>
+  <span id="context" title="Estimated context tokens used / model maximum"></span>
   <span id="status">connecting…</span>
   <button id="login-btn" style="display:none">Sign in to GitHub Copilot</button>
 </header>
@@ -145,6 +168,11 @@ const $sendBtn  = document.getElementById('send-btn');
 const $clearBtn = document.getElementById('clear-btn');
 const $status   = document.getElementById('status');
 const $loginBtn = document.getElementById('login-btn');
+const $picker   = document.getElementById('model-picker');
+const $context  = document.getElementById('context');
+
+// provider/model → max context tokens, filled in from /api/config.
+let modelMax = {};
 
 // ── utilities ──────────────────────────────────────────────────────────────
 
@@ -177,23 +205,114 @@ function updateMessage(el, text) {
   el.scrollIntoView({ block: 'end' });
 }
 
+// Annotate an assistant message with the provider/model that produced it.
+function setModelLabel(el, meta) {
+  if (!meta || !meta.model) return;
+  const label = el.querySelector('.label');
+  if (!label) return;
+  label.textContent = 'Assistant ';
+  const tag = document.createElement('span');
+  tag.className = 'model';
+  tag.textContent = meta.provider ? meta.provider + '/' + meta.model : meta.model;
+  label.appendChild(tag);
+}
+
 function setStatus(msg, cls) {
   $status.textContent = msg;
   $status.className = cls || '';
 }
 
+// ── model picker + context meter ────────────────────────────────────────────
+
+// Currently selected picker entry, split into provider + model + max context.
+function selectedModel() {
+  const val = $picker.value || '';
+  const slash = val.indexOf('/');
+  if (slash < 0) return null;
+  return { provider: val.slice(0, slash), model: val.slice(slash + 1), max: modelMax[val] || 0 };
+}
+
+// Populate the picker from /api/config, grouping models by provider and using
+// `provider/model` as both the value and the visible label. A previously chosen
+// entry is preserved across refreshes when it still exists.
+function buildPicker(list) {
+  const prev = $picker.value;
+  $picker.innerHTML = '';
+  modelMax = {};
+  let count = 0;
+  for (const p of list) {
+    if (!p.models || !p.models.length) continue;
+    const group = document.createElement('optgroup');
+    group.label = p.label || p.id;
+    for (const m of p.models) {
+      const val = p.id + '/' + m.id;
+      modelMax[val] = m.maxContext || 0;
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = val;
+      group.appendChild(opt);
+      count++;
+    }
+    $picker.appendChild(group);
+  }
+  if (!count) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'no models available';
+    $picker.appendChild(opt);
+    $picker.disabled = true;
+    return;
+  }
+  $picker.disabled = false;
+  if (prev && Object.prototype.hasOwnProperty.call(modelMax, prev)) $picker.value = prev;
+}
+
+// Compact token count, e.g. 128000 → "128k", 1234 → "1.2k".
+function fmtTokens(n) {
+  n = Number(n) || 0;
+  return n >= 1000 ? (Math.round(n / 100) / 10) + 'k' : String(n);
+}
+
+// Rough token estimate for the provider-neutral history (~4 chars/token). Exact
+// counts need a per-provider tokenizer; this is a dependency-free approximation.
+function estimateTokens(hist) {
+  let chars = 0;
+  for (const m of hist) {
+    if (typeof m.content === 'string') chars += m.content.length;
+    for (const tc of m.tool_calls || []) {
+      chars += (tc.name || '').length + JSON.stringify(tc.input || {}).length;
+    }
+  }
+  return Math.ceil(chars / 4);
+}
+
+// Refresh the "≈ used / max" context indicator for the current selection.
+function updateContext() {
+  const sel = selectedModel();
+  const used = estimateTokens(history);
+  if (sel && sel.max) $context.textContent = 'ctx ≈ ' + fmtTokens(used) + ' / ' + fmtTokens(sel.max);
+  else if (used)      $context.textContent = 'ctx ≈ ' + fmtTokens(used);
+  else                $context.textContent = '';
+}
+
 // ── streaming (unified events from server) ─────────────────────────────────
 // The server emits a single event shape regardless of provider:
+//   { type: 'meta',  provider, model }  – which model is answering
 //   { type: 'text',  text }         – streamed assistant text
 //   { type: 'tool',  id, name, input } – a complete tool call
 //   { type: 'error', error }
 //   { type: 'done' }
 
-async function streamChat(messages, onText) {
+async function streamChat(messages, onText, onMeta) {
+  const sel = selectedModel();
   const resp = await fetch('/api/chat', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ messages }),
+    body:    JSON.stringify({
+      messages,
+      provider: sel ? sel.provider : undefined,
+      model:    sel ? sel.model : undefined,
+    }),
   });
 
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -201,7 +320,7 @@ async function streamChat(messages, onText) {
   const reader  = resp.body.getReader();
   const decoder = new TextDecoder();
   let   buffer  = '';
-  const result  = { text: '', tool_calls: [] };
+  const result  = { text: '', tool_calls: [], meta: null };
 
   while (true) {
     const { value, done } = await reader.read();
@@ -215,7 +334,8 @@ async function streamChat(messages, onText) {
       if (!raw) continue;
       let ev;
       try { ev = JSON.parse(raw); } catch (_) { continue; }
-      if (ev.type === 'text') { result.text += ev.text; if (onText) onText(result.text); }
+      if (ev.type === 'meta') { result.meta = ev; if (onMeta) onMeta(ev); }
+      else if (ev.type === 'text') { result.text += ev.text; if (onText) onText(result.text); }
       else if (ev.type === 'tool')  result.tool_calls.push({ id: ev.id, name: ev.name, input: ev.input });
       else if (ev.type === 'error') throw new Error(ev.error);
     }
@@ -246,7 +366,11 @@ async function agentLoop(userText) {
 
     let result;
     try {
-      result = await streamChat(history, (text) => updateMessage(el, text));
+      result = await streamChat(
+        history,
+        (text) => updateMessage(el, text),
+        (meta) => setModelLabel(el, meta),
+      );
     } catch (err) {
       updateMessage(el, 'Error: ' + err.message);
       return;
@@ -256,6 +380,7 @@ async function agentLoop(userText) {
     const toolCalls = result.tool_calls.filter(tc => tc && tc.name);
 
     if (text) updateMessage(el, text);
+    else if (result.meta) updateMessage(el, '(no text — used tools)');
     else      el.remove();
 
     // Record the assistant turn in the unified format.
@@ -263,7 +388,7 @@ async function agentLoop(userText) {
       history.push({ role: 'assistant', content: text, tool_calls: toolCalls });
     }
 
-    if (!toolCalls.length) break;
+    if (!toolCalls.length) { updateContext(); break; }
 
     // Execute each tool and append its result.
     for (const tc of toolCalls) {
@@ -276,6 +401,7 @@ async function agentLoop(userText) {
 
       history.push({ role: 'tool', tool_call_id: tc.id, content: output });
     }
+    updateContext();
   }
 }
 
@@ -312,22 +438,32 @@ $input.addEventListener('input', () => {
   $input.style.height = Math.min($input.scrollHeight, 200) + 'px';
 });
 
+$picker.addEventListener('change', updateContext);
+
 $clearBtn.addEventListener('click', () => {
   history = [];
   $messages.innerHTML = '';
   setStatus('ready', 'ok');
+  updateContext();
 });
 
 // ── copilot sign-in (GitHub device flow, streamed over SSE) ─────────────────
 
+// Load the provider/model list and (re)build the picker. Every configured or
+// reachable provider contributes its models; the rest simply don't appear, so
+// the app works with whatever is available. Copilot shows a sign-in button
+// until it has models.
 async function refreshConfig() {
   try {
     const cfg = await fetch('/api/config').then(r => r.json());
-    const name = cfg.label || cfg.provider || 'unknown';
-    if (cfg.configured) setStatus('ready — ' + name + ' · ' + cfg.model, 'ok');
-    else                setStatus(name + ' not configured — set an API key', 'err');
-    // Offer in-app sign-in only when the Copilot provider is active.
-    $loginBtn.style.display = cfg.provider === 'copilot' ? '' : 'none';
+    const list = cfg.providers || [];
+    buildPicker(list);
+    const copilot = list.find(p => p.id === 'copilot');
+    $loginBtn.style.display = (copilot && (!copilot.models || !copilot.models.length)) ? '' : 'none';
+    const total = list.reduce((n, p) => n + ((p.models && p.models.length) || 0), 0);
+    if (total) setStatus('ready', 'ok');
+    else       setStatus('no providers configured — set an API key, start Ollama, or sign in', 'err');
+    updateContext();
   } catch (e) {
     setStatus('server error', 'err');
   }

@@ -27,6 +27,7 @@ const os = require('os');
 const path = require('path');
 
 const { createOpenAICompatible } = require('./openai-compatible');
+const { getJson } = require('./util');
 const { EDITOR_HEADERS, readSavedToken, log, fingerprint } = require('./copilot-auth');
 
 let session = null; // { token, expiresAt } cached session token
@@ -168,6 +169,46 @@ module.exports = createOpenAICompatible({
 
   model() {
     return process.env.COPILOT_MODEL || 'gpt-4o';
+  },
+
+  // List the chat models the signed-in account is entitled to. The Copilot
+  // /models endpoint reports each model's context window, so the picker can
+  // show an accurate maximum. Returns [] when no token is available or the
+  // request fails, so Copilot only appears once it actually works.
+  async listModels() {
+    if (!readOAuthToken().token) return [];
+    try {
+      const token = await getSessionToken();
+      const data = await getJson({
+        transport: 'https',
+        hostname: 'api.githubcopilot.com',
+        path: '/models',
+        headers: Object.assign({ Authorization: 'Bearer ' + token, Accept: 'application/json' }, EDITOR_HEADERS),
+      });
+      const seen = new Set();
+      const models = [];
+      for (const m of data.data || []) {
+        if (!m || !m.id || seen.has(m.id)) continue;
+        const caps = m.capabilities || {};
+        // Keep chat models only (skip embeddings and the like).
+        if (caps.type && caps.type !== 'chat') continue;
+        // Context window lives under capabilities.limits in the editor API, but
+        // some variants report it at the top level; accept either, and any of
+        // the field names GitHub has used.
+        const limits = caps.limits || m.limits || {};
+        const maxContext = limits.max_context_window_tokens
+          || limits.context_window
+          || limits.max_prompt_tokens
+          || limits.max_prompt
+          || 0;
+        seen.add(m.id);
+        models.push({ id: m.id, maxContext });
+      }
+      return models;
+    } catch (e) {
+      log('model listing failed: ' + e.message);
+      return [];
+    }
   },
 
   endpoint() {

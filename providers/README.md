@@ -13,9 +13,20 @@ A provider is a plain object with these members:
 | `id` | `string` | Short identifier (`'anthropic'`), also the `PROVIDER` value |
 | `label` | `string` | Human-readable name shown in the UI |
 | `isConfigured()` | `→ boolean` | Whether the provider has the credentials/config it needs |
-| `model()` | `→ string` | Active model name (usually env-overridable) |
+| `model()` | `→ string` | Default model name (usually env-overridable) |
+| `listModels()` | `→ Promise<[{ id, maxContext }]>` | Models to offer in the picker; `[]` when unavailable |
 | `buildRequest(req)` | `→ Promise<{ transport, options, body }>` | Turn a unified request into an upstream HTTP(S) call |
 | `createParser()` | `→ { feed(data), flush() }` | Stateful parser: provider SSE → unified events |
+
+### `listModels()`
+
+Return the models the picker should list, each as `{ id, maxContext }` where
+`maxContext` is the model's context window in tokens (`0` if unknown). Discover
+them from the backend when possible and **fall back gracefully**: return `[]`
+(or a curated static list) on any error or missing configuration, so an
+unavailable provider simply doesn't appear and never breaks the app. Keep it
+quick — it runs on `/api/config`; use the shared `getJson` helper from
+`util.js`, which times out stuck requests.
 
 ### `buildRequest(req)`
 
