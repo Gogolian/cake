@@ -77,13 +77,20 @@ open the app, and click **Sign in to GitHub Copilot**.
 
 cake looks for a Copilot token in this order:
 
-1. `GITHUB_COPILOT_TOKEN` (or the `GH_COPILOT_TOKEN` / `GITHUB_TOKEN` /
-   `GH_TOKEN` fallbacks),
+1. `GITHUB_COPILOT_TOKEN` (or the `GH_COPILOT_TOKEN` fallback),
 2. the token saved by `--login`,
-3. the official editor plugins' `~/.config/github-copilot` files.
+3. the official editor plugins' `~/.config/github-copilot` files,
+4. a generic `GITHUB_TOKEN` / `GH_TOKEN`, only as a last resort.
 
 So `GITHUB_COPILOT_TOKEN` always overrides a saved login. If the token expires
 or is revoked, just run `node server.js --login` again.
+
+The generic `GITHUB_TOKEN` / `GH_TOKEN` are checked **last** on purpose: shells,
+the `gh` CLI, Codespaces and CI often export them as tokens that are **not**
+enabled for Copilot. If cake used one of those, the token exchange would fail
+with a `404` even right after a successful sign-in. When that happens, run
+`node server.js --login` (or unset `GITHUB_TOKEN` / `GH_TOKEN`) so cake uses your
+Copilot-enabled token instead.
 
 ## Architecture
 
