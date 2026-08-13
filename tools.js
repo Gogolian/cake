@@ -74,29 +74,21 @@ function runBash(command) {
   });
 }
 
-function runReadFile(p) {
-  return new Promise((resolve) => {
-    fs.readFile(path.resolve(p), 'utf8', (err, data) => {
-      resolve(err ? { error: err.message } : { content: data });
-    });
-  });
+async function runReadFile(p) {
+  try { return { content: await fs.promises.readFile(path.resolve(p), 'utf8') }; }
+  catch (e) { return { error: e.message }; }
 }
 
-function runWriteFile(p, content) {
-  return new Promise((resolve) => {
-    fs.writeFile(path.resolve(p), content, 'utf8', (err) => {
-      resolve(err ? { error: err.message } : { ok: true });
-    });
-  });
+async function runWriteFile(p, content) {
+  try { await fs.promises.writeFile(path.resolve(p), content, 'utf8'); return { ok: true }; }
+  catch (e) { return { error: e.message }; }
 }
 
-function runListDir(p) {
-  return new Promise((resolve) => {
-    fs.readdir(path.resolve(p), { withFileTypes: true }, (err, entries) => {
-      if (err) { resolve({ error: err.message }); return; }
-      resolve({ entries: entries.map((e) => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' })) });
-    });
-  });
+async function runListDir(p) {
+  try {
+    const entries = await fs.promises.readdir(path.resolve(p), { withFileTypes: true });
+    return { entries: entries.map((e) => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' })) };
+  } catch (e) { return { error: e.message }; }
 }
 
 module.exports = { definitions, run };

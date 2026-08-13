@@ -79,46 +79,61 @@ module.exports = {
     return KNOWN_MODELS;
   },
 
-  async buildRequest({ messages, tools, system, model, maxTokens }) {
-    const payload = JSON.stringify({
+  async buildRequest({ messages, tools, system, model, maxTokens, reasoningEffort }) {
+    const budgetMap = { low: 1024, medium: 8000, high: 16000 };
+    const budgetTokens = budgetMap[reasoningEffort];
+    const payload = {
       model: model || this.model(),
       max_tokens: maxTokens || 4096,
       stream: true,
       system: resolveSystem(system),
       messages: toMessages(messages),
       tools: (tools || []).map(toTool),
-    });
+    };
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+      'anthropic-version': '2023-06-01',
+    };
+    if (budgetTokens) {
+      payload.thinking   = { type: 'enabled', budget_tokens: budgetTokens };
+      payload.temperature = 1;
+      headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14';
+    }
     return {
       transport: 'https',
       options: {
         hostname: 'api.anthropic.com',
         path: '/v1/messages',
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.ANTHROPIC_API_KEY || '',
-          'anthropic-version': '2023-06-01',
-        },
+        headers,
       },
-      body: payload,
+      body: JSON.stringify(payload),
     };
   },
 
   // Stateful parser: Anthropic SSE events -> unified events.
   createParser() {
     const calls = [];
+    const thinkIndices = new Set();
     return {
       feed(data) {
         const events = [];
         let ev;
         try { ev = JSON.parse(data); } catch (_) { return events; }
-        if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'tool_use') {
-          calls[ev.index] = { id: ev.content_block.id, name: ev.content_block.name, json: '' };
+        if (ev.type === 'content_block_start' && ev.content_block) {
+          if (ev.content_block.type === 'tool_use') {
+            calls[ev.index] = { id: ev.content_block.id, name: ev.content_block.name, json: '' };
+          } else if (ev.content_block.type === 'thinking') {
+            thinkIndices.add(ev.index);
+          }
         } else if (ev.type === 'content_block_delta') {
           if (ev.delta.type === 'text_delta') {
             events.push({ type: 'text', text: ev.delta.text });
           } else if (ev.delta.type === 'input_json_delta' && calls[ev.index]) {
             calls[ev.index].json += ev.delta.partial_json;
+          } else if (ev.delta.type === 'thinking_delta' && thinkIndices.has(ev.index)) {
+            events.push({ type: 'think', text: ev.delta.thinking });
           }
         }
         return events;

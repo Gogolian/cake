@@ -1,6 +1,18 @@
 # cake 🎂
 
 Minimal code agent harness with no dependencies.
+With a focus on EFFICIENCY!
+
+## What do i mean by that?
+
+- Context is everything.
+- If a context is bloated or missing key info, 
+whole session can go to trash and we loose money.
+- If we bloat the context with unnecessary instructions - we burn tokens and money
+- If we bloat the context with bad tool outputs, whole big files, logs we burn tokens and money
+- Lets keep overhead at zero and engineer over bloat (ourselves) 
+
+## Key aspects
 
 - **Pure HTML + JS** frontend (no framework, no build step)
 - **Pure Node.js** server (zero npm dependencies)

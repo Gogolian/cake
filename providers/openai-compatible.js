@@ -83,7 +83,7 @@ function createOpenAICompatible(config) {
     model: config.model,
     listModels: config.listModels || (async () => []),
 
-    async buildRequest({ messages, tools, system, model, maxTokens }) {
+    async buildRequest({ messages, tools, system, model, maxTokens, reasoningEffort }) {
       const payload = {
         model: model || config.model(),
         stream: true,
@@ -91,6 +91,9 @@ function createOpenAICompatible(config) {
         messages: toMessages(messages, system),
         tools: (tools || []).map(toTool),
       };
+      if (reasoningEffort && /^(o1|o3|o4)/i.test(model || config.model())) {
+        payload.reasoning_effort = reasoningEffort;
+      }
       const ep = await config.endpoint();
       const headers = Object.assign(
         { 'Content-Type': 'application/json' },
