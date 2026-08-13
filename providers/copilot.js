@@ -39,7 +39,10 @@ function readOAuthToken() {
     try {
       const data = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
       for (const key of Object.keys(data)) {
-        if (key.includes('github.com') && data[key] && data[key].oauth_token) {
+        // Keys are the host, optionally suffixed with an app id, e.g.
+        // "github.com" or "github.com:Iv1.<app-id>". Match the host exactly.
+        const host = key.split(':')[0];
+        if (host === 'github.com' && data[key] && data[key].oauth_token) {
           return data[key].oauth_token;
         }
       }
